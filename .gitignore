@@ -1,4 +1,7 @@
 venv/
+__pycache__/
+*.py[cod]
+.DS_Store
 Kuditipudi_abridged.pdf
 SynthID-text_abridged.pdf
 CLAUDE.local.md

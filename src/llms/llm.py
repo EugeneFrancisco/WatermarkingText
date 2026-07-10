@@ -14,6 +14,7 @@ class LLM(ABC):
     """
     def __init__(self, configs: dict):
         self.configs = configs
+        self.device: str = configs["device"]
 
     @abstractmethod
     def sample(self, context: torch.Tensor) -> torch.Tensor:

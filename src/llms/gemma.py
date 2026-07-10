@@ -62,7 +62,6 @@ class GemmaModel(LLM):
 
         self.model_name: str = configs["model_name"]
         self.on_modal: bool = configs["on_modal"]
-        self.device: str = configs["device"]
         self.dtype: torch.dtype = configs["dtype"]
         self.temperature: float = configs["temperature"]
 

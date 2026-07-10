@@ -12,6 +12,9 @@ class Watermarker(ABC):
     def __init__(self, configs: dict):
         self.configs = configs
 
+        # All calculations will be done on this device.
+        self.device = self.configs["device"]
+
         # The base LLM that will be used to generate text.
         self.llm: LLM = self.configs["llm"]
 
@@ -54,7 +57,7 @@ class Watermarker(ABC):
             A sequence_length + generation_length tensor of token ids (or shorter if a stop
             character is encountered).
         """
-    
+
     @abstractmethod
     def distance(self, y: torch.Tensor, keys: torch.Tensor) -> torch.Tensor:
         """
@@ -64,7 +67,7 @@ class Watermarker(ABC):
         Gumbel variables. Smaller distance should mean that the keys align more closely to
         y.
         """
-    
+
     def test_statistic(self, y: torch.Tensor, xi: torch.Tensor) -> torch.Tensor:
         """
         Computes the best distance (see method) to align y with the stored key.

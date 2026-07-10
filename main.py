@@ -1,5 +1,5 @@
 import torch
-from src.gemma import GemmaModel
+from src.llms.gemma import GemmaModel
 
 TOY_GEMMA = "google/gemma-3-270m"
 BIG_GEMMA = "google/gemma-2-9b"

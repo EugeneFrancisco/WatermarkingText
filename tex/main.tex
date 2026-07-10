@@ -1,0 +1,81 @@
+\documentclass[twocolumn,9pt]{extarticle}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{newStyle}
+\usepackage{titling}
+\usepackage[ruled,linesnumbered]{algorithm2e}
+\usepackage{bm}
+\usepackage{amsthm}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{deffinition}[theorem]{Definition}
+
+\setlength{\droptitle}{-4em}
+
+\title{Something}
+\author{Eugene Francisco}
+\date{July 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Something}
+\begin{algorithm}[t]
+\SetKwInOut{Input}{Input}
+\SetKwInOut{Params}{Params}
+\SetKwInOut{Output}{Output}
+\label{algo:test_statistic}
+\caption{Test statistic $\phi$ (Kuditipudi et al.)}
+\Input{string $y \in \mathcal{V}^*$, watermark key sequence $\xi \in \Xi^n$}
+\Params{alignment cost $d$, block size $k$}
+\Output{test statistic value $\phi(y,\xi) \in \mathbb{R}$}
+\For{$i \in 1,\dots,\mathrm{len}(y)-k+1$}{
+  \For{$j \in 1,\dots,n$}{
+    $\mathbf{y}^i \gets \{y_{i+\ell}\}_{\ell=0}^{k-1}$,\quad
+    $\bm{\xi}^j \gets \{\xi_{(j+\ell)\%n}\}_{\ell=0}^{k-1}$\;
+    $\hat{d}_{i,j} \gets d(\mathbf{y}^i, \bm{\xi}^j)$\;
+  }
+}
+\Return $\min_{i,j} \hat{d}_{i,j}$\;
+\end{algorithm}
+From SynthID-text, we have
+\begin{align*}
+	\mathrm{Score}(x) = \frac{1}{mT}\sum_{t = 1}^T\sum_{\rho = 1}^m g_\rho(x_t, r_\rho).
+\end{align*}
+Define
+\begin{align}
+	\mathrm{Score}(x, \xi ) = \frac{1}{mT}\sum_{t = 1}^T\sum_{\rho = 1}^m g_\rho(x_t, \xi_\rho)\label{eq:score_func}
+\end{align}
+and let
+\begin{align}
+	d(\cdot, \cdot) = -\mathrm{Score}(\cdot, \cdot).\label{eq:alignment_func}
+\end{align}
+
+\begin{theorem}
+	Let $\phi $ be the output of Algorithm~\ref{algo:test_statistic} when ran on
+	an unwatermarked string $y \in V^*$, watermark key $\xi \in \Xi^n$, alignment function
+	as defined in Equation~\ref{eq:alignment_func} and chunk size $k$. Let $F_\phi$ and $f_\phi$ be the distribution and
+	density of $\phi$ respectively. Then
+	\begin{align*}
+	F_\phi(x) &= 1 - (1 - F_\mathrm{Score}(x))^\mu\\
+	f_\phi(x) &= \mu f_\mathrm{Score}(x)(1 - F_\mathrm{Score}(x))^{\mu - 1}
+\end{align*}
+where $\mu = (\mathrm{len}(y) - k + 1) \cdot n$ and $F_\mathrm{Score}$/
+$f_\mathrm{Score}$ are the distributions and densities of $\mathrm{Score}(y, \xi)$ for $y$ unwatermarked and $\xi \sim \nu$ (in the $N = 2$ case, $\mathrm{Score}(y, \xi)\sim \mathrm{Binomial}(m\cdot T, 0.5)$).
+\end{theorem}
+\begin{proof}
+	Observe that the distribution of $\phi$ in the theorem is the distribution of the minimum of $m$ i.i.d. random variables with density $f_{\mathrm{Score}}$ and distribution $F_{\mathrm{Score}}$; similarly for the density. It suffices to show then that $\{d(y^i, \xi^j): i\in 1, \ldots, \mathrm{len}(y) - k + 1, j\in 1, \ldots, n\}$ are i.i.d.
+
+	To show this, recall from Equation~\ref{eq:score_func} that
+	\begin{align}
+		d(y^i, \xi^j) = -\frac{1}{mT}\sum_{t = 1}^k\sum_{\rho = 1}^mg_\rho(y_t^i, \xi_\rho^j).
+	\end{align}
+	Because of how the $g_\rho$ are chosen, we will be done if we can show, for any particular $y_{i_1}$, $\xi_{i_2}$, and $g_{i_3}$, that $g_{i_3}(y_{i_1}, \xi_{i_2})$ shows up in only one of the $\{d(y^i, \xi^j)\}$. In other words, we must show that, once $y_{i_1}$, $\xi_{i_2}$, and $g_{i_3}$ are picked, $i$ and $j$ of $d(y^i, \xi^j)$ are uniquely determined. 
+\end{proof}
+\TODO, proof isn't true. 
+
+
+
+
+
+\end{document}

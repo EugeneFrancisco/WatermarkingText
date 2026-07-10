@@ -51,7 +51,7 @@ from typing import Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.llm import LLM
+from src.llms.llm import LLM
 
 
 class GemmaModel(LLM):

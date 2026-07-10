@@ -1,0 +1,120 @@
+\ProvidesPackage{newstyle}
+
+\usepackage{graphicx}
+\graphicspath{{./}}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{tcolorbox}
+\usepackage{venndiagram}
+\usepackage{witharrows}
+\usepackage[left=0.75in, right=0.75in, top=1in, bottom=1in]{geometry}
+\usepackage{mathtools}
+\usepackage{mathrsfs}
+\usepackage{pgfplots}
+\DeclarePairedDelimiter\ceil{\lceil}{\rceil}
+\DeclarePairedDelimiter\floor{\lfloor}{\rfloor}
+\newcommand{\R}{\mathbb{R}}
+%\newcommand{\F}{\mathbb{F}}
+\newcommand{\ZZ}{\mathbb{Z}}
+\newcommand{\Z}{\mathcal{Z}}
+\newcommand{\CC}{\mathbb{C}}
+\newcommand{\C}{\mathcal{C}}
+\renewcommand{\O}{\mathcal{O}}
+\newcommand{\QQ}{\mathbb{Q}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\NN}{\mathbb{N}}
+\newcommand{\xsi}{x^{(i)}}
+\newcommand{\ysi}{y^{(i)}}
+\newcommand{\FF}{\mathbb{F}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\EE}{\mathbb{E}}
+\newcommand{\M}{\mathcal{M}}
+\newcommand{\PP}{\mathbb{P}}
+\renewcommand{\P}{\mathcal{P}}
+\renewcommand{\L}{\mathcal{L}}
+\renewcommand{\S}{\mathcal{S}}
+\renewcommand{\H}{\mathcal{H}}
+\newcommand{\T}{\mathcal{T}}
+
+\newcommand{\p}[1]{^{(#1)}}
+
+\newcommand{\tc}[2]{\textcolor{#1}{#2}}
+
+\newcommand{\myhl}[1]{\colorbox{yellow}{#1}}
+
+\DeclareMathOperator{\var}{var}
+\DeclareMathOperator{\cov}{cov}
+\DeclareMathOperator{\corr}{corr}
+\DeclareMathOperator{\bern}{Bernoulli}
+\DeclareMathOperator{\poiss}{Poisson}
+\DeclareMathOperator{\binDist}{Binomial}
+\DeclareMathOperator{\betaDist}{Beta}
+\DeclareMathOperator{\expDist}{Exp}
+\DeclareMathOperator{\unif}{Uniform}
+\DeclareMathOperator{\spn}{span}
+\DeclareMathOperator{\range}{range}
+\DeclareMathOperator{\conj}{conj}
+\DeclareMathOperator{\lcm}{lcm}
+\DeclareMathOperator{\nll}{null}
+\DeclareMathOperator{\dom}{dom}
+\DeclareMathOperator*{\argmax}{argmax}
+\DeclareMathOperator*{\argmin}{argmin}
+\DeclareMathOperator{\im}{im}
+\DeclareMathOperator{\Stab}{Stab}
+\DeclareMathOperator{\orb}{orb}
+\newcommand{\TODO}{\colorbox{red}{\textcolor{white}{\textbf{TODO} }}}
+
+\usepackage{soul}
+\usepackage{enumitem}
+% -- Loading the code block package:
+\usepackage{listings}
+% -- Basic formatting
+\usepackage[english]{babel}
+\usepackage{courier}
+% -- Defining colors:
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{darkpurple}{rgb}{64, 24, 55}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95, 0.92, 0.95}
+\definecolor{verylight}{rgb}{0.95, 0.95, 0.94}
+\definecolor{excolor}{rgb}{0.89, 0.89 0.98}
+\definecolor{lemcolor}{rgb}{0.78, 0.92, 0.75}
+\definecolor{excolor3}{rgb}{0.94, 0.83, 0.80}
+\definecolor{excolor4}{rgb}{0.85, 0.85, 0.85}
+
+% Defining a custom style:
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codepurple},
+    keywordstyle=\color{NavyBlue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize\bfseries,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=t,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=true,                  
+    tabsize=2
+}
+% -- Setting up the custom style:
+\lstset{style=mystyle}
+
+% Setting up colorbox commands
+\newenvironment{question}{\begin{tcolorbox}[sharp corners, width=\textwidth,colback={excolor}, colframe=darkgray]}{\end{tcolorbox}}
+
+% \newenvironment{lemma}{\begin{tcolorbox}[width=\textwidth,colback={lemcolor}]}{\end{tcolorbox}}
+
+\newenvironment{claim}{\begin{tcolorbox}[width=\textwidth,colback={backcolour}]}{\end{tcolorbox}}
+
+\newenvironment{whitebox}{\begin{tcolorbox}[width=\textwidth,colback={verylight}]}{\end{tcolorbox}}
+
+\renewcommand{\familydefault}{\sfdefault}
+  
+\endinput

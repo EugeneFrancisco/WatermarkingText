@@ -108,7 +108,6 @@ class GemmaModel(LLM):
         Returns:
             A B x vocab_size tensor of pre-softmax logits.
         """
-        context = context.to(self.device)
         logits = self.model(input_ids=context).logits  # B x seq_len x vocab
         return logits[:, -1, :]
 
@@ -128,7 +127,7 @@ class GemmaModel(LLM):
             A (sequence_length + n) tensor of token ids, n <= length.
         """
         # Add a batch dim of 1; the model always expects B x seq_len.
-        tokens = context.to(self.device).unsqueeze(0)
+        tokens = context.unsqueeze(0)
 
         # Prime the cache on the full context, then feed one token at a time.
         out = self.model(input_ids=tokens, use_cache=True)
@@ -149,7 +148,7 @@ class GemmaModel(LLM):
             past = out.past_key_values
 
         full = torch.cat([tokens] + generated, dim=1)
-        return full.squeeze(0).cpu()
+        return full.squeeze(0)
 
     def tokens_to_text(self, tokens: torch.Tensor) -> str:
         """

@@ -78,16 +78,18 @@ class TournamentWatermarker(Watermarker):
         number in [0, 1) and thresholded at 0.5. Replacing SynthID-text's context-based seed
         with the pre-chosen key follows Kuditipudi et al.
         """
-        tokens = tokens.to(torch.int64).unsqueeze(-1)  # (..., 1)
-        keys = keys.to(torch.int64).unsqueeze(-1)      # (..., 1)
+        tokens = tokens.to(torch.int64).unsqueeze(-1)                       # (..., 1)
+        keys = keys.to(torch.int64).unsqueeze(-1)                           # (..., 1)
         layers = torch.arange(1, self.num_rounds + 1, device=tokens.device)  # (m,)
 
         z = (tokens * 15485863 + keys * 32452843 + layers * 49979687) % self._PRIME
         z = (z * z) % self._PRIME
         z = (z * 32452843) % self._PRIME
         z = (z * z) % self._PRIME
-        uniform = z.double() / self._PRIME
-        return (uniform > 0.5).to(torch.float32)  # (..., m)
+        # Threshold the pseudo-uniform value z / _PRIME at 0.5 in exact integer
+        # arithmetic (2*z > _PRIME). This avoids float64 (unsupported on MPS) and
+        # keeps the g-values deterministic. 2*z < 2^32 stays within int64.
+        return (z * 2 > self._PRIME).to(torch.float32)  # (..., m)
 
     def decoder(self, key: float, logits: torch.Tensor) -> torch.Tensor:
         """
@@ -131,7 +133,6 @@ class TournamentWatermarker(Watermarker):
             character is encountered).
         """
         model = self.llm.model
-        context = context.to(self.device)
 
         # Prime the KV cache on the full context, then feed one token at a time.
         out = model(input_ids=context.unsqueeze(0), use_cache=True)
@@ -150,8 +151,7 @@ class TournamentWatermarker(Watermarker):
             out = model(input_ids=next_token.view(1, 1), past_key_values=past, use_cache=True)
             past = out.past_key_values
 
-        full = torch.cat([context, torch.stack(generated)])
-        return full.cpu()
+        return torch.cat([context, torch.stack(generated)])
 
     def distance(self, y: torch.Tensor, keys: torch.Tensor) -> torch.Tensor:
         """
@@ -168,3 +168,43 @@ class TournamentWatermarker(Watermarker):
         g = self._g_values(y, keys)  # (k, m)
         score = g.mean()  # (1 / (m * k)) * sum_t sum_l g_l(y_t, keys_t)
         return -score
+
+    def test_statistic(self, y: torch.Tensor, xi: torch.Tensor) -> torch.Tensor:
+        """
+        Efficient override of the base test statistic (Algorithm 3 of Kuditipudi et al.).
+
+        The base class recomputes the block distance for every (y-substring, xi-substring)
+        pair, which repeatedly re-sums the same g-values for overlapping blocks. Instead we
+
+            1. Pre-compute a (len(y), key_length) score matrix S where
+                   S[a, b] = -sum_{l=1}^m g_l(y[a], xi[b]),
+               i.e. the negated per-position g-value sum for each (token, key) pair.
+            2. Slide a length-block_size window diagonally through S and keep the smallest
+               window sum. A diagonal (both indices advancing together) corresponds exactly
+               to aligning the block y[j:j+k] with the wrapped block xi[i+j : i+j+k].
+
+        The returned value is the minimum block sum divided by (block_size * num_rounds), so
+        it is the same negated-mean Score the base class returns, only computed once per entry.
+        """
+        k = self.block_size
+        n = self.key_length
+        len_y = len(y)
+
+        # S[a, b] = -sum_l g_l(y[a], xi[b]); broadcasting y over rows and xi over columns.
+        # _g_values returns (len_y, n, m), so summing the last axis leaves (len_y, n).
+        scores = -self._g_values(y.view(-1, 1), xi.view(1, -1)).sum(dim=-1)  # (len_y, n)
+
+        rows = torch.arange(len_y, device=y.device)
+        min_sum = torch.tensor(float("inf"), device=y.device)
+        # Outer loop over the xi offset i. For offset i the diagonal picks column (i + t) % n
+        # for row t, wrapping xi around the key sequence. The inner sliding-window minimum over
+        # start index j is done with a cumulative sum: each length-k window sum is the running
+        # sum with the left-behind element subtracted and the newly included one added.
+        for i in range(n):
+            cols = (i + rows) % n
+            diag = scores[rows, cols]  # (len_y,) diagonal starting at xi offset i
+            prefix = torch.cat([torch.zeros(1, device=diag.device), diag.cumsum(0)])
+            window_sums = prefix[k:] - prefix[:-k]  # (len_y - k + 1,) length-k block sums
+            min_sum = torch.minimum(min_sum, window_sums.min())
+
+        return min_sum / (k * self.num_rounds)

@@ -81,8 +81,9 @@ class Watermarker(ABC):
         min_dist = torch.inf
         for i in range(len(y) - self.block_size + 1):
             y_i = y[i:i + self.block_size]
-            for j in range(self.key_length - self.block_size + 1):
-                xi_j = xi[j:j + self.block_size]
+            for j in range(self.key_length):
+                indices = (j + torch.arange(self.block_size)) % self.key_length
+                xi_j = xi[indices]
                 dist = self.distance(y_i, xi_j)
                 if dist < min_dist:
                     min_dist = dist
@@ -100,7 +101,7 @@ class Watermarker(ABC):
         Returns:
             A torch.Tensor float between 0 and 1 p-value.
         """
-        stats = torch.empty(self.resample_size, 1)
+        stats = torch.empty(self.resample_size, 1, device=self.device)
         for t in range(self.resample_size):
             this_xi = self.sample_xi()
             this_stat = self.test_statistic(y, this_xi)

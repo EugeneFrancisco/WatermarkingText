@@ -11,7 +11,10 @@
   "watermarker": {
     "device": "mps",
     "key_length": 256,
-    "block_size": 20,
-    "resample_size": 50
+    "block_size": 100,
+    "resample_size": 1000,
+    "evaluating": true,
+    "generation_length": 100,
+    "fpr": 0.05
   }
 }

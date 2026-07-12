@@ -96,28 +96,37 @@ class TournamentWatermarker(Watermarker):
         Given a watermarking key and logits for the next sample from the underlying llm
         distribution, returns the token-id of the next sampled watermarked text. This is
         done using tournament sampling on the probability distribution associated with logits.
+
+        Rather than materialising the 2^m leaves of the tournament, propagate the
+        winner distribution through one layer at a time. For a binary tournament
+        with Bernoulli g-values, one layer transforms the probability of token x as
+
+            p'(x) = p(x) * (1 + g(x) - E_p[g]).
+
+        This has exactly the same output distribution as explicitly sampling and
+        running the tournament, while using memory linear in the vocabulary size.
         """
-        # Sample the M = 2^m tournament participants from the llm distribution (with replacement).
-        probs = torch.softmax(logits / self.llm.temperature, dim=-1)
-        candidates = torch.multinomial(probs, self.num_samples, replacement=True)  # (M,)
+        # Accumulate the recurrence in float32 even when model logits use a lower
+        # precision. Later layers can otherwise underflow for low-probability tokens.
+        probs = torch.softmax(
+            logits.to(torch.float32) / self.llm.temperature,
+            dim=-1,
+        )
 
-        # g[i, l] is the l-th layer g-value of candidate i under this position's key.
-        key_tensor = torch.as_tensor(key, device=candidates.device)
-        g = self._g_values(candidates, key_tensor)  # (M, m)
+        token_ids = torch.arange(logits.shape[-1], device=logits.device)
+        key_tensor = torch.as_tensor(key, device=logits.device)
+        g_values = self._g_values(token_ids, key_tensor)  # (vocab_size, m)
 
-        # Knockout tournament: in round l the survivors are split into groups of
-        # num_participants and the token with the highest g_l advances (ties broken randomly).
-        idx = torch.arange(self.num_samples, device=candidates.device)
         for layer in range(self.num_rounds):
-            group_scores = g[idx, layer].view(-1, self.num_participants)
-            group_idx = idx.view(-1, self.num_participants)
-            # Scaling by 1e6 keeps the g-value the deciding factor while the uniform noise
-            # only breaks ties between equal g-values.
-            noisy = group_scores * 1e6 + torch.rand_like(group_scores)
-            winners = noisy.argmax(dim=1)
-            idx = group_idx[torch.arange(group_idx.shape[0], device=candidates.device), winners]
+            g = g_values[:, layer]
+            g_mass = torch.sum(probs * g)
+            probs = probs * (1 + g - g_mass)
 
-        return candidates[idx].squeeze(0)  # 0-dim token id
+            # The recurrence is normalized analytically. Renormalizing limits
+            # floating-point drift across many tournament layers.
+            probs = probs / probs.sum()
+
+        return torch.multinomial(probs, 1).squeeze(0)  # 0-dim token id
 
     @torch.no_grad()
     def generate(self, context: torch.Tensor, generation_length: int) -> torch.Tensor:

@@ -1,29 +1,29 @@
-from pathlib import Path
+from torch.utils.data import Subset
 
 from src.configs import build_configs
+from src.data.utils import load_c4_realnewslike_dataset
 from src.watermarkers.tournament_watermarker import TournamentWatermarker
+from src.watermarkers.exponential_watermarker import ExponentialWatermarker
 
-CONFIG_PATH = Path(__file__).parent / "configs" / "tournament_example.json"
 
+def main() -> None:
+    # watermarker_configs = build_configs(
+    #     "configs/watermarking_configs.json",
+    #     "configs/exponential_configs.json",
+    # )
+    # watermarker = ExponentialWatermarker(watermarker_configs)
 
-def main():
     watermarker_configs = build_configs(
         "configs/watermarking_configs.json",
-        "configs/tournament_configs.json"
+        "configs/tournament_configs.json",
     )
     watermarker = TournamentWatermarker(watermarker_configs)
-    gemma_llm = watermarker.llm
 
-    # Generate watermarked text for "The capital of france is". The watermarker and llm
-    # assume on-device tensors, so it is our job to move the tokenized context there.
-    context = gemma_llm.text_to_tokens("The capital of France is").to(watermarker.device)
-    output = watermarker.generate(context, 100)
-    print(gemma_llm.tokens_to_text(output))
+    dataset = load_c4_realnewslike_dataset("data/c4_realnewslike_gemma")
+    demonstration_data = Subset(dataset, range(min(10, len(dataset))))
+    results = watermarker.evaluate(demonstration_data)
+    print(results)
 
-    # Detect: low p-value means the text looks watermarked.
-    generated = output[len(context):]
-    p_value = watermarker.detect(generated, use_levenshtein=False)
-    print("Detection p-value:", p_value.item())
 
 if __name__ == "__main__":
     main()

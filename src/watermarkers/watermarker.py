@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from src.llms.llm import LLM
 import torch
 from torch.utils.data import Dataset
+from tqdm.auto import tqdm
 
 class Watermarker(ABC):
     """
@@ -216,7 +217,8 @@ class Watermarker(ABC):
         Evaluates the watermarker on the passed in dataset. Evaluation is done by performing
         watermarked text generation on the passed in dataset and seeing how well our watermarker
         detects the watermark. Detection is done at a fixed false positive rate of
-        self.fpr.
+        self.fpr. For each prompt, we generate self.generation_length tokens. This generated
+        text is what is used to evaluate detection.
 
         TODO, later on, we should insert a noiser between the text generation and the detector.
 
@@ -242,4 +244,35 @@ class Watermarker(ABC):
                 max: the maximum p-value observed.
             }
         """
+        p_values: list[torch.Tensor] = []
 
+        for prompt in tqdm(dataset, desc="Evaluating"):
+            prompt = torch.as_tensor(prompt, device=self.device)
+            output = self.generate(prompt, self.generation_length)
+            generated = output[len(prompt):]
+
+            if len(generated) < self.block_size:
+                # Skip text that is too small; for example, if we encounter an end of text token.
+                continue
+
+            p_values.append(self.detect(generated, use_levenshtein=False))
+
+        if not p_values:
+            raise ValueError("dataset must contain at least one prompt")
+
+        values = torch.stack(p_values).flatten().float().cpu()
+        percentiles = torch.quantile(
+            values, torch.tensor([0.25, 0.50, 0.75])
+        )
+
+        return {
+            "power": (values <= self.fpr).float().mean().item(),
+            "mean_p": values.mean().item(),
+            "percentiles": {
+                0.25: percentiles[0].item(),
+                0.50: percentiles[1].item(),
+                0.75: percentiles[2].item(),
+            },
+            "min": values.min().item(),
+            "max": values.max().item(),
+        }

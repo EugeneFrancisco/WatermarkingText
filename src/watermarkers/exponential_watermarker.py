@@ -23,10 +23,6 @@ class ExponentialWatermarker(Watermarker):
         # Match TournamentWatermarker's Gemma-specific, KV-cache generation path.
         assert isinstance(self.llm, GemmaModel)
 
-        # EXP does not use tournament rounds, but retaining this required config
-        # lets one configs dict be used unchanged for both watermarkers.
-        self.num_rounds: int = self.configs["num_rounds"]
-
     def sample_xi(self) -> torch.Tensor:
         """Sample one Uniform(0, 1) vector over the vocabulary per key position."""
         vocab_size = self.llm.model.config.vocab_size

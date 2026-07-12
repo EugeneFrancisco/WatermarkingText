@@ -2,7 +2,6 @@ venv/
 __pycache__/
 *.py[cod]
 .DS_Store
-Kuditipudi_abridged.pdf
 Kuditipudi*.pdf
 SynthID-text_abridged.pdf
 preferences.md
@@ -13,3 +12,6 @@ MODEL_CHOICE.md
 *.fdb_latexmk
 *.fls
 *.log
+
+# Generated evaluation datasets
+data/c4_realnewslike_gemma/

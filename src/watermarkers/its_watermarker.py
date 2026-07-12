@@ -21,10 +21,6 @@ class ITSWatermarker(Watermarker):
         # Match the existing watermarkers' Gemma-specific, KV-cache generation path.
         assert isinstance(self.llm, GemmaModel)
 
-        # ITS does not use tournament rounds, but retaining this required config
-        # allows one configs dict to be used unchanged across watermarkers.
-        self.num_rounds: int = self.configs["num_rounds"]
-
         vocab_size = self.llm.model.config.vocab_size
         # Maps each token id to its index in the CDF ordering. The practical
         # ITS variant shares this one permutation across all key positions.

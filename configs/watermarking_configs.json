@@ -1,0 +1,17 @@
+{
+  "llm": {
+    "type": "gemma",
+    "model_name": "google/gemma-3-270m",
+    "on_modal": false,
+    "hf_token": null,
+    "device": "mps",
+    "dtype": "float32",
+    "temperature": 1.0
+  },
+  "watermarker": {
+    "device": "mps",
+    "key_length": 256,
+    "block_size": 20,
+    "resample_size": 50
+  }
+}

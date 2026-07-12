@@ -5,6 +5,7 @@ from typing import Callable
 from abc import ABC, abstractmethod
 from src.llms.llm import LLM
 import torch
+from torch.utils.data import Dataset
 
 class Watermarker(ABC):
     """
@@ -34,6 +35,14 @@ class Watermarker(ABC):
         # The cost of inserting or deleting one token in the simple
         # Levenshtein alignment from Definition 5 of Kuditipudi et al.
         self.levenshtein_penalty = self.configs["levenshtein_penalty"]
+
+        if self.configs.get("evaluating", False):
+            # This is the number of tokens
+            self.generation_length = self.configs["generation_length"]
+
+            # This is the false positive rate that we wish to use for watermark detection.
+            # During evaluation, this is used to estimate statistical power of detection.
+            self.fpr = self.configs["fpr"]
 
     @abstractmethod
     def sample_xi(self) -> torch.Tensor:
@@ -201,3 +210,36 @@ class Watermarker(ABC):
             )
         )
         return p_hat
+
+    def evaluate(self, dataset: Dataset) -> dict:
+        """
+        Evaluates the watermarker on the passed in dataset. Evaluation is done by performing
+        watermarked text generation on the passed in dataset and seeing how well our watermarker
+        detects the watermark. Detection is done at a fixed false positive rate of
+        self.fpr.
+
+        TODO, later on, we should insert a noiser between the text generation and the detector.
+
+        Args:
+            dataset: A torch dataset of data that we wish to evaluate. The dataset should be
+            organized so that each element of the dataset should be a "prompt" of token ids
+            of fixed size. This means the dataset's dimensions should be an N x prompt_length
+            matrix of token ids.
+        Returns:
+            A dictionary of information of how the watermarker performed. The dictionary has the
+            following structure:
+
+            {
+                power: the true positive rate observed when we reject the null hypothesis at
+                    significance level self.fpr.
+                mean_p: the mean p-value observed.
+                percentiles: {
+                    0.25: the 25th percentile p-value observed.
+                    0.50: the 50th percentile p-value observed.
+                    0.75: the 75th percentile p-value observed.
+                }
+                min: the minimum p-value observed.
+                max: the maximum p-value observed.
+            }
+        """
+

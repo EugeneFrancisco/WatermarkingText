@@ -1,0 +1,4 @@
+{
+    "num_rounds": 8,
+    "levenshtein_penalty": 1
+}

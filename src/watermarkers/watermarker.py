@@ -98,23 +98,28 @@ class Watermarker(ABC):
         Matching a token and key costs distance_single_token, while inserting
         or deleting an element costs self.levenshtein_penalty.
         """
-        num_tokens = len(y)
-        num_keys = len(keys)
+        substitution_costs = self.distance_single_token(
+            y.unsqueeze(1), keys.unsqueeze(0)
+        )
+        return self._levenshtein_from_costs(substitution_costs)
+
+    def _levenshtein_from_costs(
+        self, substitution_costs: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute Definition 5 from a precomputed substitution-cost matrix."""
+        num_tokens, num_keys = substitution_costs.shape
         distances = torch.empty(
             (num_tokens + 1, num_keys + 1),
-            device=y.device,
-            dtype=torch.float32,
+            device=substitution_costs.device,
+            dtype=substitution_costs.dtype,
         )
         distances[:, 0] = (
-            torch.arange(num_tokens + 1, device=y.device)
+            torch.arange(num_tokens + 1, device=substitution_costs.device)
             * self.levenshtein_penalty
         )
         distances[0, :] = (
-            torch.arange(num_keys + 1, device=y.device)
+            torch.arange(num_keys + 1, device=substitution_costs.device)
             * self.levenshtein_penalty
-        )
-        substitution_costs = self.distance_single_token(
-            y.unsqueeze(1), keys.unsqueeze(0)
         )
 
         for i in range(1, num_tokens + 1):

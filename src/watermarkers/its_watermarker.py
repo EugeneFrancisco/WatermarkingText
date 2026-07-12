@@ -87,12 +87,6 @@ class ITSWatermarker(Watermarker):
         self, y: torch.Tensor, xi: torch.Tensor, use_levenshtein: bool
     ) -> torch.Tensor:
         """Efficiently compute Algorithm 3 for ITS's additive alignment cost."""
-        distance_function = (
-            self.distance_levenshtein if use_levenshtein else self.distance
-        )
-        if use_levenshtein:
-            return self._test_statistic_brute_force(y, xi, distance_function)
-
         block_size = self.block_size
         text_length = len(y)
 
@@ -102,6 +96,27 @@ class ITSWatermarker(Watermarker):
         # costs[t, j] is |xi[j] - rank(y[t])|. A diagonal aligns consecutive
         # text tokens with consecutive, wrapped watermark-key positions.
         costs = self.distance_single_token(y.unsqueeze(1), xi.unsqueeze(0))
+
+        if use_levenshtein:
+            min_cost = torch.tensor(float("inf"), device=y.device)
+            block_indices = torch.arange(block_size, device=y.device)
+
+            for text_start in range(text_length - block_size + 1):
+                text_indices = text_start + block_indices
+                for key_start in range(self.key_length):
+                    key_indices = (
+                        key_start + block_indices
+                    ) % self.key_length
+                    substitution_costs = costs[
+                        text_indices.unsqueeze(1), key_indices.unsqueeze(0)
+                    ]
+                    min_cost = torch.minimum(
+                        min_cost,
+                        self._levenshtein_from_costs(substitution_costs),
+                    )
+
+            return min_cost
+
         rows = torch.arange(text_length, device=y.device)
         min_cost = torch.tensor(float("inf"), device=y.device)
 

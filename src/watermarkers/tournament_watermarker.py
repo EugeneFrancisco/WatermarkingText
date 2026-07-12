@@ -174,37 +174,6 @@ class TournamentWatermarker(Watermarker):
         """Return the negated mean tournament score for one token and key."""
         return -self._g_values(y, key).mean(dim=-1)
 
-    def _levenshtein_from_costs(self, substitution_costs: torch.Tensor) -> torch.Tensor:
-        """Compute Definition 5 from a precomputed substitution-cost matrix."""
-        num_tokens, num_keys = substitution_costs.shape
-        distances = torch.empty(
-            (num_tokens + 1, num_keys + 1),
-            device=substitution_costs.device,
-            dtype=substitution_costs.dtype,
-        )
-        distances[:, 0] = (
-            torch.arange(num_tokens + 1, device=substitution_costs.device)
-            * self.levenshtein_penalty
-        )
-        distances[0, :] = (
-            torch.arange(num_keys + 1, device=substitution_costs.device)
-            * self.levenshtein_penalty
-        )
-
-        for i in range(1, num_tokens + 1):
-            for j in range(1, num_keys + 1):
-                substitution = (
-                    distances[i - 1, j - 1]
-                    + substitution_costs[i - 1, j - 1]
-                )
-                insertion = distances[i, j - 1] + self.levenshtein_penalty
-                deletion = distances[i - 1, j] + self.levenshtein_penalty
-                distances[i, j] = torch.minimum(
-                    substitution, torch.minimum(insertion, deletion)
-                )
-
-        return distances[num_tokens, num_keys]
-
     def test_statistic(
         self, y: torch.Tensor, xi: torch.Tensor, use_levenshtein: bool
     ) -> torch.Tensor:

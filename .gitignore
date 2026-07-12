@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 Kuditipudi_abridged.pdf
+Kuditipudi*.pdf
 SynthID-text_abridged.pdf
 preferences.md
 MODEL_CHOICE.md

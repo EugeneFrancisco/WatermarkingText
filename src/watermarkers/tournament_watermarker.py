@@ -166,11 +166,48 @@ class TournamentWatermarker(Watermarker):
         the selected tokens towards high g-values, watermarked text scores highly, so the more
         aligned the keys are the smaller (more negative) this distance is.
         """
-        g = self._g_values(y, keys)  # (k, m)
-        score = g.mean()  # (1 / (m * k)) * sum_t sum_l g_l(y_t, keys_t)
-        return -score
+        return self.distance_single_token(y, keys).mean()
 
-    def test_statistic(self, y: torch.Tensor, xi: torch.Tensor) -> torch.Tensor:
+    def distance_single_token(
+        self, y: torch.Tensor, key: torch.Tensor
+    ) -> torch.Tensor:
+        """Return the negated mean tournament score for one token and key."""
+        return -self._g_values(y, key).mean(dim=-1)
+
+    def _levenshtein_from_costs(self, substitution_costs: torch.Tensor) -> torch.Tensor:
+        """Compute Definition 5 from a precomputed substitution-cost matrix."""
+        num_tokens, num_keys = substitution_costs.shape
+        distances = torch.empty(
+            (num_tokens + 1, num_keys + 1),
+            device=substitution_costs.device,
+            dtype=substitution_costs.dtype,
+        )
+        distances[:, 0] = (
+            torch.arange(num_tokens + 1, device=substitution_costs.device)
+            * self.levenshtein_penalty
+        )
+        distances[0, :] = (
+            torch.arange(num_keys + 1, device=substitution_costs.device)
+            * self.levenshtein_penalty
+        )
+
+        for i in range(1, num_tokens + 1):
+            for j in range(1, num_keys + 1):
+                substitution = (
+                    distances[i - 1, j - 1]
+                    + substitution_costs[i - 1, j - 1]
+                )
+                insertion = distances[i, j - 1] + self.levenshtein_penalty
+                deletion = distances[i - 1, j] + self.levenshtein_penalty
+                distances[i, j] = torch.minimum(
+                    substitution, torch.minimum(insertion, deletion)
+                )
+
+        return distances[num_tokens, num_keys]
+
+    def test_statistic(
+        self, y: torch.Tensor, xi: torch.Tensor, use_levenshtein: bool
+    ) -> torch.Tensor:
         """
         Efficient override of the base test statistic (Algorithm 3 of Kuditipudi et al.).
 
@@ -180,20 +217,44 @@ class TournamentWatermarker(Watermarker):
             1. Pre-compute a (len(y), key_length) score matrix S where
                    S[a, b] = -sum_{l=1}^m g_l(y[a], xi[b]),
                i.e. the negated per-position g-value sum for each (token, key) pair.
-            2. Slide a length-block_size window diagonally through S and keep the smallest
-               window sum. A diagonal (both indices advancing together) corresponds exactly
-               to aligning the block y[j:j+k] with the wrapped block xi[i+j : i+j+k].
+            2. For the ordinary distance, slide a length-block_size window diagonally
+               through S. For the Levenshtein distance, run dynamic programming on each
+               relevant block_size-by-block_size submatrix of S.
 
-        The returned value is the minimum block sum divided by (block_size * num_rounds), so
-        it is the same negated-mean Score the base class returns, only computed once per entry.
+        In both cases each g-value is computed only once, including when overlapping
+        Levenshtein alignments reuse the same token-key substitution costs.
         """
         k = self.block_size
         n = self.key_length
         len_y = len(y)
 
-        # S[a, b] = -sum_l g_l(y[a], xi[b]); broadcasting y over rows and xi over columns.
-        # _g_values returns (len_y, n, m), so summing the last axis leaves (len_y, n).
-        scores = -self._g_values(y.view(-1, 1), xi.view(1, -1)).sum(dim=-1)  # (len_y, n)
+        if len_y < k:
+            raise ValueError("y must be at least block_size tokens long")
+
+        # Convert the per-token mean back to a sum so the normalization below
+        # remains identical to distance().
+        scores = self.distance_single_token(
+            y.view(-1, 1), xi.view(1, -1)
+        ) * self.num_rounds  # (len_y, n)
+
+        if use_levenshtein:
+            min_dist = torch.tensor(float("inf"), device=y.device)
+            block_indices = torch.arange(k, device=y.device)
+
+            for text_start in range(len_y - k + 1):
+                text_indices = text_start + block_indices
+                for key_start in range(n):
+                    key_indices = (key_start + block_indices) % n
+                    # Definition 5 uses the per-token mean score as d_0, so undo
+                    # the sum-over-rounds representation used by scores.
+                    substitution_costs = (
+                        scores[text_indices.unsqueeze(1), key_indices.unsqueeze(0)]
+                        / self.num_rounds
+                    )
+                    dist = self._levenshtein_from_costs(substitution_costs)
+                    min_dist = torch.minimum(min_dist, dist)
+
+            return min_dist
 
         rows = torch.arange(len_y, device=y.device)
         min_sum = torch.tensor(float("inf"), device=y.device)

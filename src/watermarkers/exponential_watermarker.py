@@ -69,11 +69,32 @@ class ExponentialWatermarker(Watermarker):
 
     def distance(self, y: torch.Tensor, keys: torch.Tensor) -> torch.Tensor:
         """Return EXP's practical alignment cost from equation (6)."""
-        selected_keys = keys[torch.arange(len(y), device=y.device), y]
-        return torch.log1p(-selected_keys).sum()
+        return self.distance_single_token(y, keys).sum()
 
-    def test_statistic(self, y: torch.Tensor, xi: torch.Tensor) -> torch.Tensor:
+    def distance_single_token(
+        self, y: torch.Tensor, key: torch.Tensor
+    ) -> torch.Tensor:
+        """Return the EXP alignment cost for one token and key vector."""
+        # gather also permits broadcasted batches, which lets detection build its
+        # token-by-key-position cost table with this same primitive.
+        shape = torch.broadcast_shapes(y.shape, key.shape[:-1])
+        token_ids = y.to(torch.long).expand(shape)
+        expanded_keys = key.expand(*shape, key.shape[-1])
+        selected_key = torch.gather(
+            expanded_keys, -1, token_ids.unsqueeze(-1)
+        ).squeeze(-1)
+        return torch.log1p(-selected_key)
+
+    def test_statistic(
+        self, y: torch.Tensor, xi: torch.Tensor, use_levenshtein: bool
+    ) -> torch.Tensor:
         """Efficiently compute Algorithm 3 for EXP's additive alignment cost."""
+        distance_function = (
+            self.distance_levenshtein if use_levenshtein else self.distance
+        )
+        if use_levenshtein:
+            return self._test_statistic_brute_force(y, xi, distance_function)
+
         block_size = self.block_size
         text_length = len(y)
 
@@ -82,7 +103,7 @@ class ExponentialWatermarker(Watermarker):
 
         # costs[t, j] is log(1 - xi[j, y[t]]). A diagonal of this matrix
         # corresponds to aligning consecutive text and wrapped key positions.
-        costs = torch.log1p(-xi[:, y].transpose(0, 1))
+        costs = self.distance_single_token(y.unsqueeze(1), xi.unsqueeze(0))
         rows = torch.arange(text_length, device=y.device)
         min_cost = torch.tensor(float("inf"), device=y.device)
 

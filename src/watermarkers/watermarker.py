@@ -1,6 +1,7 @@
 """
 A file for the text watermarker base class.
 """
+from typing import Callable
 from abc import ABC, abstractmethod
 from src.llms.llm import LLM
 import torch
@@ -29,6 +30,10 @@ class Watermarker(ABC):
 
         # The block size for sliding window detection.
         self.block_size = self.configs["block_size"]
+
+        # The cost of inserting or deleting one token in the simple
+        # Levenshtein alignment from Definition 5 of Kuditipudi et al.
+        self.levenshtein_penalty = self.configs["levenshtein_penalty"]
 
     @abstractmethod
     def sample_xi(self) -> torch.Tensor:
@@ -73,28 +78,97 @@ class Watermarker(ABC):
         y.
         """
 
-    def test_statistic(self, y: torch.Tensor, xi: torch.Tensor) -> torch.Tensor:
+    @abstractmethod
+    def distance_single_token(self, y: torch.Tensor, key: torch.Tensor) -> torch.Tensor:
+        """
+        Given a single token id y and a single key, returns how well this y and this key
+        align. This corresponds to d_0(y, key) in Kuditipudi et al.
+
+        Args:
+            y: A torch tensor of a single token id.
+            key: A torch tensor of a single key.
+        Returns:
+            A float torch tensor representing the distance.
+        """
+
+    def distance_levenshtein(self, y: torch.Tensor, keys: torch.Tensor) -> torch.Tensor:
+        """
+        Return the simple Levenshtein alignment cost from Definition 5.
+
+        Matching a token and key costs distance_single_token, while inserting
+        or deleting an element costs self.levenshtein_penalty.
+        """
+        num_tokens = len(y)
+        num_keys = len(keys)
+        distances = torch.empty(
+            (num_tokens + 1, num_keys + 1),
+            device=y.device,
+            dtype=torch.float32,
+        )
+        distances[:, 0] = (
+            torch.arange(num_tokens + 1, device=y.device)
+            * self.levenshtein_penalty
+        )
+        distances[0, :] = (
+            torch.arange(num_keys + 1, device=y.device)
+            * self.levenshtein_penalty
+        )
+        substitution_costs = self.distance_single_token(
+            y.unsqueeze(1), keys.unsqueeze(0)
+        )
+
+        for i in range(1, num_tokens + 1):
+            for j in range(1, num_keys + 1):
+                substitution = (
+                    distances[i - 1, j - 1]
+                    + substitution_costs[i - 1, j - 1]
+                )
+                insertion = distances[i, j - 1] + self.levenshtein_penalty
+                deletion = distances[i - 1, j] + self.levenshtein_penalty
+                distances[i, j] = torch.minimum(
+                    substitution, torch.minimum(insertion, deletion)
+                )
+
+        return distances[num_tokens, num_keys]
+
+    def _test_statistic_brute_force(
+        self,
+        y: torch.Tensor,
+        xi: torch.Tensor,
+        distance_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    ) -> torch.Tensor:
+        """Compute Algorithm 3 using the supplied alignment distance."""
+        min_dist = torch.tensor(float("inf"), device=y.device)
+        for i in range(len(y) - self.block_size + 1):
+            y_i = y[i:i + self.block_size]
+            for j in range(self.key_length):
+                indices = (
+                    j + torch.arange(self.block_size, device=xi.device)
+                ) % self.key_length
+                xi_j = xi[indices]
+                dist = distance_function(y_i, xi_j)
+                min_dist = torch.minimum(min_dist, dist)
+        return min_dist
+
+    def test_statistic(
+        self, y: torch.Tensor, xi: torch.Tensor, use_levenshtein: bool
+    ) -> torch.Tensor:
         """
         Computes the best distance (see method) to align y with the stored key.
         Args:
             y: A sequence_length torch tensor of token ids.
             xi: A key sequence (xi) to test on.
+            use_levenshtein: Whether to use the edit-robust Levenshtein cost.
         Returns:
             A torch Tensor float representing the minimum distance. See Algorithm 3 of Kuditipudi
             et al.
         """
-        min_dist = torch.inf
-        for i in range(len(y) - self.block_size + 1):
-            y_i = y[i:i + self.block_size]
-            for j in range(self.key_length):
-                indices = (j + torch.arange(self.block_size)) % self.key_length
-                xi_j = xi[indices]
-                dist = self.distance(y_i, xi_j)
-                if dist < min_dist:
-                    min_dist = dist
-        return min_dist
+        distance_function = (
+            self.distance_levenshtein if use_levenshtein else self.distance
+        )
+        return self._test_statistic_brute_force(y, xi, distance_function)
 
-    def detect(self, y: torch.Tensor) -> torch.Tensor:
+    def detect(self, y: torch.Tensor, use_levenshtein: bool) -> torch.Tensor:
         """
         An implementation of Algorithm 2 from Kuditipudi et al. This function
         returns an estimated p-value for the probability of observing y given
@@ -103,16 +177,22 @@ class Watermarker(ABC):
         of the watermarking key used for text generation.
         Args:
             y: A sequence_length torch tensor that we want to find the p-value of.
+            use_levenshtein: Whether detection should use the Levenshtein cost.
         Returns:
             A torch.Tensor float between 0 and 1 p-value.
         """
         stats = torch.empty(self.resample_size, 1, device=self.device)
         for t in range(self.resample_size):
             this_xi = self.sample_xi()
-            this_stat = self.test_statistic(y, this_xi)
+            this_stat = self.test_statistic(y, this_xi, use_levenshtein)
             stats[t] = this_stat
         p_hat = (
             1/(self.resample_size + 1)
-            * (1 + torch.sum(stats <= self.test_statistic(y, self.xi)))
+            * (
+                1
+                + torch.sum(
+                    stats <= self.test_statistic(y, self.xi, use_levenshtein)
+                )
+            )
         )
         return p_hat

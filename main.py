@@ -23,6 +23,7 @@ def main():
         "num_rounds": 8,
         "block_size": 20,
         "resample_size": 50,
+        "levenshtein_penalty": 1.0,
     }
     watermarker = TournamentWatermarker(watermarker_configs)
 
@@ -34,7 +35,7 @@ def main():
 
     # Detect: low p-value means the text looks watermarked.
     generated = output[len(context):]
-    p_value = watermarker.detect(generated)
+    p_value = watermarker.detect(generated, use_levenshtein=False)
     print("Detection p-value:", p_value.item())
 
 if __name__ == "__main__":

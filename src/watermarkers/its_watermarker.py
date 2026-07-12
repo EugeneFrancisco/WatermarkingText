@@ -74,21 +74,34 @@ class ITSWatermarker(Watermarker):
 
     def distance(self, y: torch.Tensor, keys: torch.Tensor) -> torch.Tensor:
         """Return the practical ITS alignment cost from equation (3)."""
-        normalized_ranks = self.permutation[y] / (len(self.permutation) - 1)
-        return torch.abs(keys - normalized_ranks).sum()
+        return self.distance_single_token(y, keys).sum()
 
-    def test_statistic(self, y: torch.Tensor, xi: torch.Tensor) -> torch.Tensor:
+    def distance_single_token(
+        self, y: torch.Tensor, key: torch.Tensor
+    ) -> torch.Tensor:
+        """Return the ITS alignment cost for one token and scalar key."""
+        normalized_rank = self.permutation[y] / (len(self.permutation) - 1)
+        return torch.abs(key - normalized_rank)
+
+    def test_statistic(
+        self, y: torch.Tensor, xi: torch.Tensor, use_levenshtein: bool
+    ) -> torch.Tensor:
         """Efficiently compute Algorithm 3 for ITS's additive alignment cost."""
+        distance_function = (
+            self.distance_levenshtein if use_levenshtein else self.distance
+        )
+        if use_levenshtein:
+            return self._test_statistic_brute_force(y, xi, distance_function)
+
         block_size = self.block_size
         text_length = len(y)
 
         if text_length < block_size:
             raise ValueError("y must be at least block_size tokens long")
 
-        normalized_ranks = self.permutation[y] / (len(self.permutation) - 1)
         # costs[t, j] is |xi[j] - rank(y[t])|. A diagonal aligns consecutive
         # text tokens with consecutive, wrapped watermark-key positions.
-        costs = torch.abs(normalized_ranks.unsqueeze(1) - xi.unsqueeze(0))
+        costs = self.distance_single_token(y.unsqueeze(1), xi.unsqueeze(0))
         rows = torch.arange(text_length, device=y.device)
         min_cost = torch.tensor(float("inf"), device=y.device)
 

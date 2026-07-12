@@ -138,10 +138,11 @@ class TournamentWatermarker(Watermarker):
         out = model(input_ids=context.unsqueeze(0), use_cache=True)
         past = out.past_key_values
         generated = []
+        key_offset = self.sample_key_offset()
 
         for t in range(generation_length):
             logits = out.logits[0, -1, :]  # (vocab,)
-            key = self.xi[t % self.key_length]
+            key = self.xi[(key_offset + t) % self.key_length]
             next_token = self.decoder(key, logits)  # 0-dim
             generated.append(next_token)
 

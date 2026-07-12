@@ -36,6 +36,10 @@ class Watermarker(ABC):
         Samples a random watermarking key sequence that is self.key_length long.
         """
 
+    def sample_key_offset(self) -> int:
+        """Sample the starting position used for one watermarked generation."""
+        return torch.randint(self.key_length, (), device=self.device).item()
+
     @abstractmethod
     def decoder(self, key: float, logits: torch.Tensor) -> torch.Tensor:
         """
@@ -49,7 +53,8 @@ class Watermarker(ABC):
         Generates watermarked text given the context which is generation_length long. This is an
         abstract method so that implementations can be taylored to the particular llm we are
         using and this way we can KV cache. This function is essentially an implementation
-        of Algorithm 1 from Kuditipudi et al.
+        of Algorithm 4 from Kuditipudi et al., which selects a random key offset before
+        generating each text.
         Args:
             context: a sequence_length tensor of token ids.
             generation_length: the length of text we want to generate.

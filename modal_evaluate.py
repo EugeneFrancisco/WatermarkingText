@@ -9,6 +9,11 @@ modal run --detach modal_evaluate.py \
   --num-examples 10 \
   --model-name google/gemma-2-9b
 
+modal run --detach modal_evaluate.py \
+  --build-references \
+  --num-examples 1000 \
+  --model-name google/gemma-2-9b
+
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ PROJECT_ROOT = Path("/root/project")
 DATASET_PATH = PROJECT_ROOT / "data/c4_realnewslike_gemma"
 HF_CACHE_PATH = Path("/cache/huggingface")
 RESULTS_PATH = Path("/results")
+REFERENCE_DISTRIBUTIONS_PATH = Path("/reference_distributions")
 
 app = modal.App(APP_NAME)
 hf_cache = modal.Volume.from_name(
@@ -31,6 +37,9 @@ hf_cache = modal.Volume.from_name(
 )
 results_volume = modal.Volume.from_name(
     "watermarking-evaluation-results", create_if_missing=True
+)
+reference_distributions_volume = modal.Volume.from_name(
+    "watermarking-reference-distributions", create_if_missing=True
 )
 
 # Keep source/configuration and generated data as separate mounts. In particular,
@@ -144,7 +153,9 @@ def evaluate_watermarker(
     dataset = load_c4_realnewslike_dataset(DATASET_PATH)
     count = min(num_examples, len(dataset))
     if count <= 0:
-        raise ValueError("num_examples must be positive and the dataset must be nonempty")
+        raise ValueError(
+            "num_examples must be positive and the dataset must be nonempty"
+        )
 
     results = watermarker.evaluate(Subset(dataset, range(count)))
     results["num_examples_requested"] = num_examples
@@ -156,6 +167,98 @@ def evaluate_watermarker(
     # omitted.
     results["experiment_config"] = common["watermarker"] | method_config
     return results
+
+
+@app.function(
+    image=image,
+    gpu="L40S",
+    timeout=24 * 60 * 60,
+    secrets=[modal.Secret.from_name("huggingface")],
+    volumes={
+        str(HF_CACHE_PATH): hf_cache,
+        str(REFERENCE_DISTRIBUTIONS_PATH): reference_distributions_volume,
+    },
+)
+def build_reference_distributions(
+    num_examples: int = 1_000,
+    model_name: str = "google/gemma-3-270m",
+) -> list[str]:
+    """Build all six reference distributions and persist them on Modal."""
+    import os
+    import sys
+
+    import torch
+    from torch.utils.data import Subset
+
+    os.chdir(PROJECT_ROOT)
+    sys.path.insert(0, str(PROJECT_ROOT))
+    reference_distributions_volume.reload()
+
+    from src.data.reference_distributions_script import (
+        save_reference_distributions,
+    )
+    from src.data.utils import load_c4_realnewslike_dataset
+    from src.llms.gemma import GemmaModel
+    from src.watermarkers.exponential_watermarker import ExponentialWatermarker
+    from src.watermarkers.its_watermarker import ITSWatermarker
+    from src.watermarkers.tournament_watermarker import TournamentWatermarker
+
+    with (PROJECT_ROOT / "configs/watermarking_configs.json").open(
+        encoding="utf-8"
+    ) as config_file:
+        common = json.load(config_file)
+
+    llm_config = common["llm"] | {
+        "model_name": model_name,
+        "on_modal": True,
+        "hf_token": None,
+        "device": "cuda",
+        "dtype": torch.bfloat16,
+    }
+    llm_config.pop("type", None)
+    llm = GemmaModel(llm_config)
+    hf_cache.commit()
+
+    dataset = load_c4_realnewslike_dataset(DATASET_PATH)
+    count = min(num_examples, len(dataset))
+    if count <= 0:
+        raise ValueError(
+            "num_examples must be positive and the dataset must be nonempty"
+        )
+    dataset = Subset(dataset, range(count))
+
+    watermarker_types = (
+        (
+            "exponential",
+            ExponentialWatermarker,
+            PROJECT_ROOT / "configs/exponential_configs.json",
+        ),
+        ("its", ITSWatermarker, PROJECT_ROOT / "configs/its_configs.json"),
+        (
+            "tournament",
+            TournamentWatermarker,
+            PROJECT_ROOT / "configs/tournament_configs.json",
+        ),
+    )
+    saved_paths: list[str] = []
+    for name, watermarker_type, method_config_path in watermarker_types:
+        with method_config_path.open(encoding="utf-8") as config_file:
+            method_config = json.load(config_file)
+        config = common["watermarker"] | method_config | {
+            "device": "cuda",
+            "llm": llm,
+        }
+        watermarker = watermarker_type(config)
+        paths = save_reference_distributions(
+            watermarker,
+            name,
+            dataset,
+            REFERENCE_DISTRIBUTIONS_PATH,
+            reference_distributions_volume.commit,
+        )
+        saved_paths.extend(str(path) for path in paths)
+
+    return saved_paths
 
 
 @app.function(volumes={str(RESULTS_PATH): results_volume})
@@ -209,10 +312,22 @@ def run_and_save_evaluation(
 @app.local_entrypoint()
 def main(
     watermarker: str = "tournament",
-    num_examples: int = 500,
+    num_examples: int = 1_000,
     model_name: str = "google/gemma-3-270m",
+    build_references: bool = False,
 ) -> None:
     """Submit remote orchestration and return without waiting for completion."""
+    if build_references:
+        function_call = build_reference_distributions.spawn(
+            num_examples,
+            model_name,
+        )
+        print(
+            "Submitted detached reference-distribution call "
+            f"{function_call.object_id}"
+        )
+        return
+
     function_call = run_and_save_evaluation.spawn(
         watermarker,
         num_examples,

@@ -212,6 +212,48 @@ class Watermarker(ABC):
         )
         return p_hat
 
+    def build_null_distribution(
+        self, dataset: Dataset, use_levenshtein: bool
+    ) -> torch.Tensor:
+        """
+        Using the passed in dataset, generates text using the dataset and then computes
+        null test statistics of the generated text which are then returned for later bootstrapped
+        use. The generated text is always self.generation_length long.
+
+        Note that the dataset passed in here should closely reflect the data that we later
+        wish to check watermarks; otherwise the distribution of these reference statistics
+        will differ from the test statistics calculated in the original detect method.
+
+        Args:
+            dataset: A dataset of prompts where each element of the dataset is one prompt.
+            use_levenshtein: Whether detection should use the Levenshtein cost.
+        Returns:
+            A torch tensor of all the observed test statistics
+        """
+        statistics: list[torch.Tensor] = []
+
+        for prompt in tqdm(dataset, desc="Building null distribution"):
+            prompt = torch.as_tensor(prompt, device=self.device)
+            output = self.generate(prompt, self.generation_length)
+            generated = output[len(prompt):]
+
+            if len(generated) < self.block_size:
+                # Detection cannot score a sequence shorter than one block.
+                continue
+
+            xi = self.sample_xi()
+            statistic = self.test_statistic(
+                generated, xi, use_levenshtein=use_levenshtein
+            )
+            statistics.append(statistic)
+
+        if not statistics:
+            raise ValueError(
+                "dataset must produce at least one generation of block_size tokens"
+            )
+
+        return torch.stack(statistics).flatten()
+
     def evaluate(self, dataset: Dataset) -> dict:
         """
         Evaluates the watermarker on the passed in dataset. Evaluation is done by performing

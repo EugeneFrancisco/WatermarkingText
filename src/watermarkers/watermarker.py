@@ -1,12 +1,19 @@
 """
 A file for the text watermarker base class.
 """
-from typing import Callable
 from abc import ABC, abstractmethod
-from src.llms.llm import LLM
+import os
+from pathlib import Path
+from typing import BinaryIO, Callable
+import uuid
+
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
+
+from src.llms.llm import LLM
+
 
 class Watermarker(ABC):
     """
@@ -213,12 +220,18 @@ class Watermarker(ABC):
         return p_hat
 
     def build_null_distribution(
-        self, dataset: Dataset, use_levenshtein: bool
+        self,
+        dataset: Dataset,
+        use_levenshtein: bool,
+        save_dir: str | Path,
+        checkpoint_callback: Callable[[], None] | None = None,
     ) -> torch.Tensor:
         """
         Using the passed in dataset, generates text using the dataset and then computes
-        null test statistics of the generated text which are then returned for later bootstrapped
-        use. The generated text is always self.generation_length long.
+        null test statistics for later bootstrapped use. Progress is saved after every
+        100 computed statistics, so an interrupted run resumes from its latest checkpoint
+        instead of rebuilding the distribution from scratch. The generated text is always
+        self.generation_length long.
 
         Note that the dataset passed in here should closely reflect the data that we later
         wish to check watermarks; otherwise the distribution of these reference statistics
@@ -227,32 +240,125 @@ class Watermarker(ABC):
         Args:
             dataset: A dataset of prompts where each element of the dataset is one prompt.
             use_levenshtein: Whether detection should use the Levenshtein cost.
+            save_dir: Directory in which the completed distribution and its in-progress
+                checkpoint are stored.
+            checkpoint_callback: Optional callback invoked after each atomic checkpoint.
+                Modal callers use this to commit the mounted Volume.
         Returns:
             A torch tensor of all the observed test statistics
         """
-        statistics: list[torch.Tensor] = []
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+        distribution_name = (
+            "levenshtein" if use_levenshtein else "non_levenshtein"
+        )
+        completed_path = save_path / f"{distribution_name}.npy"
+        checkpoint_path = save_path / f".{distribution_name}.checkpoint.npz"
+        dataset_length = len(dataset)
 
-        for prompt in tqdm(dataset, desc="Building null distribution"):
+        if completed_path.exists():
+            print(f"Loading completed reference distribution: {completed_path}")
+            values = np.load(completed_path, allow_pickle=False)
+            if checkpoint_path.exists():
+                checkpoint_path.unlink()
+                if checkpoint_callback is not None:
+                    checkpoint_callback()
+            return torch.from_numpy(np.array(values, copy=True)).to(self.device)
+
+        statistics: list[float] = []
+        next_dataset_index = 0
+        checkpoint_interval = 100
+        if checkpoint_path.exists():
+            with np.load(checkpoint_path, allow_pickle=False) as checkpoint:
+                checkpoint_dataset_length = int(checkpoint["dataset_length"])
+                if checkpoint_dataset_length != dataset_length:
+                    raise ValueError(
+                        "Cannot resume reference distribution with a different "
+                        f"dataset length: checkpoint has {checkpoint_dataset_length}, "
+                        f"current dataset has {dataset_length}"
+                    )
+                next_dataset_index = int(checkpoint["next_dataset_index"])
+                statistics = checkpoint["statistics"].astype(
+                    np.float64, copy=False
+                ).tolist()
+            if not 0 <= next_dataset_index <= dataset_length:
+                raise ValueError(
+                    f"Invalid next dataset index {next_dataset_index} in "
+                    f"checkpoint {checkpoint_path}"
+                )
+            print(
+                f"Resuming {distribution_name} reference distribution at "
+                f"dataset index {next_dataset_index}/{dataset_length} "
+                f"with {len(statistics)} completed statistics"
+            )
+
+        def atomic_numpy_save(
+            path: Path, writer: Callable[[BinaryIO], None]
+        ) -> None:
+            temporary_path = path.with_name(
+                f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            )
+            try:
+                with temporary_path.open("wb") as output_file:
+                    writer(output_file)
+                    output_file.flush()
+                    os.fsync(output_file.fileno())
+                temporary_path.replace(path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+
+        progress = tqdm(
+            range(next_dataset_index, dataset_length),
+            total=dataset_length,
+            initial=next_dataset_index,
+            desc=f"Building {distribution_name} null distribution",
+        )
+        statistics_at_last_checkpoint = len(statistics)
+        for dataset_index in progress:
+            prompt = dataset[dataset_index]
             prompt = torch.as_tensor(prompt, device=self.device)
             output = self.generate(prompt, self.generation_length)
             generated = output[len(prompt):]
 
-            if len(generated) < self.block_size:
-                # Detection cannot score a sequence shorter than one block.
-                continue
+            if len(generated) >= self.block_size:
+                xi = self.sample_xi()
+                statistic = self.test_statistic(
+                    generated, xi, use_levenshtein=use_levenshtein
+                )
+                statistics.append(float(statistic.detach().cpu()))
 
-            xi = self.sample_xi()
-            statistic = self.test_statistic(
-                generated, xi, use_levenshtein=use_levenshtein
-            )
-            statistics.append(statistic)
+            if (
+                len(statistics) - statistics_at_last_checkpoint
+                >= checkpoint_interval
+            ):
+                atomic_numpy_save(
+                    checkpoint_path,
+                    lambda output_file, next_index=dataset_index + 1: np.savez(
+                        output_file,
+                        statistics=np.asarray(statistics, dtype=np.float64),
+                        next_dataset_index=np.asarray(next_index, dtype=np.int64),
+                        dataset_length=np.asarray(dataset_length, dtype=np.int64),
+                    ),
+                )
+                statistics_at_last_checkpoint = len(statistics)
+                if checkpoint_callback is not None:
+                    checkpoint_callback()
 
         if not statistics:
             raise ValueError(
                 "dataset must produce at least one generation of block_size tokens"
             )
 
-        return torch.stack(statistics).flatten()
+        values = np.asarray(statistics, dtype=np.float64)
+        atomic_numpy_save(
+            completed_path,
+            lambda output_file: np.save(output_file, values),
+        )
+        checkpoint_path.unlink(missing_ok=True)
+        if checkpoint_callback is not None:
+            checkpoint_callback()
+
+        return torch.from_numpy(values.copy()).to(self.device)
 
     def evaluate(self, dataset: Dataset) -> dict:
         """

@@ -1,4 +1,4 @@
 {
     "num_rounds": 30,
-    "levenshtein_penalty": 1
+    "levenshtein_penalty": 0
 }

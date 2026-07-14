@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import Callable
 
-import numpy as np
 from torch.utils.data import Dataset, Subset
 
 from src.watermarkers.watermarker import Watermarker
@@ -16,9 +15,8 @@ def save_reference_distributions(
     output_dir: str | Path,
     flush: Callable[[], None],
 ) -> list[Path]:
-    """Build and save both reference distributions for one watermarker."""
+    """Build both resumable reference distributions for one watermarker."""
     method_dir = Path(output_dir) / watermarker_name
-    method_dir.mkdir(parents=True, exist_ok=True)
     paths = []
 
     for use_levenshtein, filename in (
@@ -26,17 +24,12 @@ def save_reference_distributions(
         (True, "levenshtein.npy"),
     ):
         path = method_dir / filename
-        if path.exists():
-            print(f"Skipping existing reference distribution: {path}")
-            paths.append(path)
-            continue
-
-        values = watermarker.build_null_distribution(dataset, use_levenshtein)
-        temporary_path = path.with_suffix(".tmp")
-        with temporary_path.open("wb") as output_file:
-            np.save(output_file, values.detach().cpu().numpy())
-        temporary_path.replace(path)
-        flush()
+        watermarker.build_null_distribution(
+            dataset,
+            use_levenshtein,
+            method_dir,
+            checkpoint_callback=flush,
+        )
         paths.append(path)
 
     return paths

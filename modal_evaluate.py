@@ -171,7 +171,7 @@ def evaluate_watermarker(
 
 @app.function(
     image=image,
-    gpu="L40S",
+    gpu="A10",
     timeout=24 * 60 * 60,
     secrets=[modal.Secret.from_name("huggingface")],
     volumes={
@@ -242,6 +242,16 @@ def build_reference_distributions(
     )
     saved_paths: list[str] = []
     for name, watermarker_type, method_config_path in watermarker_types:
+        method_dir = REFERENCE_DISTRIBUTIONS_PATH / name
+        expected_paths = (
+            method_dir / "non_levenshtein.npy",
+            method_dir / "levenshtein.npy",
+        )
+        if all(path.exists() for path in expected_paths):
+            print(f"Skipping completed reference distributions for {name}")
+            saved_paths.extend(str(path) for path in expected_paths)
+            continue
+
         with method_config_path.open(encoding="utf-8") as config_file:
             method_config = json.load(config_file)
         config = common["watermarker"] | method_config | {

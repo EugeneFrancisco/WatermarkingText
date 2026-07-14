@@ -15,24 +15,16 @@ def save_reference_distributions(
     output_dir: str | Path,
     flush: Callable[[], None],
 ) -> list[Path]:
-    """Build both resumable reference distributions for one watermarker."""
+    """Build the resumable non-Levenshtein distribution for one watermarker."""
     method_dir = Path(output_dir) / watermarker_name
-    paths = []
-
-    for use_levenshtein, filename in (
-        (False, "non_levenshtein.npy"),
-        (True, "levenshtein.npy"),
-    ):
-        path = method_dir / filename
-        watermarker.build_null_distribution(
-            dataset,
-            use_levenshtein,
-            method_dir,
-            checkpoint_callback=flush,
-        )
-        paths.append(path)
-
-    return paths
+    path = method_dir / "non_levenshtein.npy"
+    watermarker.build_null_distribution(
+        dataset,
+        use_levenshtein=False,
+        save_dir=method_dir,
+        checkpoint_callback=flush,
+    )
+    return [path]
 
 
 def main() -> None:

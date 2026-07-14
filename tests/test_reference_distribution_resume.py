@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from src.data.reference_distributions_script import save_reference_distributions
 from src.watermarkers.watermarker import Watermarker
 
 
@@ -117,6 +118,27 @@ class ReferenceDistributionResumeTest(unittest.TestCase):
                 resumed.build_null_distribution(
                     self.dataset[:-1], False, directory
                 )
+
+    def test_reference_helper_only_builds_non_levenshtein_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            watermarker = _CheckpointWatermarker()
+            commits = []
+            paths = save_reference_distributions(
+                watermarker,
+                "test_method",
+                self.dataset,
+                directory,
+                lambda: commits.append(None),
+            )
+
+            expected_path = Path(directory) / "test_method/non_levenshtein.npy"
+            self.assertEqual(paths, [expected_path])
+            self.assertTrue(expected_path.exists())
+            self.assertFalse(
+                (Path(directory) / "test_method/levenshtein.npy").exists()
+            )
+            self.assertEqual(watermarker.generate_calls, len(self.dataset))
+            self.assertEqual(len(commits), 3)
 
 
 if __name__ == "__main__":

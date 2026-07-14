@@ -1,6 +1,9 @@
 """
 An exponential-minimum text watermarker from Kuditipudi et al.
 """
+from pathlib import Path
+
+import numpy as np
 import torch
 
 from src.llms.gemma import GemmaModel
@@ -22,6 +25,28 @@ class ExponentialWatermarker(Watermarker):
 
         # Match TournamentWatermarker's Gemma-specific, KV-cache generation path.
         assert isinstance(self.llm, GemmaModel)
+
+        reference_path = configs.get("reference_dist_paths", {}).get(
+            "non_levenshtein"
+        )
+        self.reference_distribution: torch.Tensor | None = None
+        if reference_path is not None:
+            values = np.load(Path(reference_path), allow_pickle=False)
+            if values.ndim != 1 or values.size == 0:
+                raise ValueError(
+                    "The non-Levenshtein reference distribution must be a "
+                    "nonempty one-dimensional array"
+                )
+            if not np.issubdtype(values.dtype, np.number) or not np.isfinite(
+                values
+            ).all():
+                raise ValueError(
+                    "The non-Levenshtein reference distribution must contain "
+                    "only finite numeric values"
+                )
+            self.reference_distribution = torch.as_tensor(
+                values, dtype=torch.float32, device=self.device
+            )
 
     def sample_xi(self) -> torch.Tensor:
         """Sample one Uniform(0, 1) vector over the vocabulary per key position."""

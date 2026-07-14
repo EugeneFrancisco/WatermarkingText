@@ -192,17 +192,32 @@ class Watermarker(ABC):
 
     def detect(self, y: torch.Tensor, use_levenshtein: bool) -> torch.Tensor:
         """
-        An implementation of Algorithm 2 from Kuditipudi et al. This function
-        returns an estimated p-value for the probability of observing y given
-        that the text was not watermarked. It does this by comparing the texts'
-        test statistic on randomly sampled watermarking keys with the rest statistic
-        of the watermarking key used for text generation.
+        An implementation of Algorithms 2 and 5 from Kuditipudi et al. This
+        function returns an estimated p-value for the probability of observing y
+        given that the text was not watermarked. When the watermarker has a
+        non-Levenshtein reference distribution, it compares against those saved
+        statistics. Otherwise, it computes null statistics using randomly sampled
+        watermarking keys.
         Args:
             y: A sequence_length torch tensor that we want to find the p-value of.
             use_levenshtein: Whether detection should use the Levenshtein cost.
         Returns:
             A torch.Tensor float between 0 and 1 p-value.
         """
+        observed_stat = self.test_statistic(
+            y, self.xi, use_levenshtein=use_levenshtein
+        )
+        reference_distribution = getattr(
+            self, "reference_distribution", None
+        )
+        if reference_distribution is not None and not use_levenshtein:
+            reference_distribution = reference_distribution.to(
+                device=observed_stat.device, dtype=observed_stat.dtype
+            )
+            return (
+                1 + torch.sum(reference_distribution <= observed_stat)
+            ) / (reference_distribution.numel() + 1)
+
         stats = torch.empty(self.resample_size, 1, device=self.device)
         for t in range(self.resample_size):
             this_xi = self.sample_xi()
@@ -212,9 +227,7 @@ class Watermarker(ABC):
             1/(self.resample_size + 1)
             * (
                 1
-                + torch.sum(
-                    stats <= self.test_statistic(y, self.xi, use_levenshtein)
-                )
+                + torch.sum(stats <= observed_stat)
             )
         )
         return p_hat

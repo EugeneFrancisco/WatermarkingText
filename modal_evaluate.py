@@ -65,6 +65,10 @@ image = (
         "data/c4_realnewslike_gemma",
         str(DATASET_PATH),
     )
+    .add_local_dir(
+        "data/reference_distributions",
+        str(PROJECT_ROOT / "data/reference_distributions"),
+    )
 )
 
 
@@ -183,7 +187,7 @@ def build_reference_distributions(
     num_examples: int = 1_000,
     model_name: str = "google/gemma-3-270m",
 ) -> list[str]:
-    """Build all six reference distributions and persist them on Modal."""
+    """Build Tournament and ITS non-Levenshtein distributions on Modal."""
     import os
     import sys
 
@@ -199,7 +203,6 @@ def build_reference_distributions(
     )
     from src.data.utils import load_c4_realnewslike_dataset
     from src.llms.gemma import GemmaModel
-    from src.watermarkers.exponential_watermarker import ExponentialWatermarker
     from src.watermarkers.its_watermarker import ITSWatermarker
     from src.watermarkers.tournament_watermarker import TournamentWatermarker
 
@@ -229,27 +232,19 @@ def build_reference_distributions(
 
     watermarker_types = (
         (
-            "exponential",
-            ExponentialWatermarker,
-            PROJECT_ROOT / "configs/exponential_configs.json",
-        ),
-        ("its", ITSWatermarker, PROJECT_ROOT / "configs/its_configs.json"),
-        (
             "tournament",
             TournamentWatermarker,
             PROJECT_ROOT / "configs/tournament_configs.json",
         ),
+        ("its", ITSWatermarker, PROJECT_ROOT / "configs/its_configs.json"),
     )
     saved_paths: list[str] = []
     for name, watermarker_type, method_config_path in watermarker_types:
         method_dir = REFERENCE_DISTRIBUTIONS_PATH / name
-        expected_paths = (
-            method_dir / "non_levenshtein.npy",
-            method_dir / "levenshtein.npy",
-        )
-        if all(path.exists() for path in expected_paths):
-            print(f"Skipping completed reference distributions for {name}")
-            saved_paths.extend(str(path) for path in expected_paths)
+        expected_path = method_dir / "non_levenshtein.npy"
+        if expected_path.exists():
+            print(f"Skipping completed reference distribution for {name}")
+            saved_paths.append(str(expected_path))
             continue
 
         with method_config_path.open(encoding="utf-8") as config_file:

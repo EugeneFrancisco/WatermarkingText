@@ -20,6 +20,14 @@ C4_REALNEWSLIKE_VALIDATION_URL = (
     "https://huggingface.co/datasets/allenai/c4/resolve/main/realnewslike/"
     "c4-validation.00000-of-00001.json.gz"
 )
+C4_REALNEWSLIKE_TRAIN_URL = (
+    "https://huggingface.co/datasets/allenai/c4/resolve/main/realnewslike/"
+    "c4-train.00000-of-00512.json.gz"
+)
+C4_REALNEWSLIKE_URLS = {
+    "train": C4_REALNEWSLIKE_TRAIN_URL,
+    "validation": C4_REALNEWSLIKE_VALIDATION_URL,
+}
 DEFAULT_OUTPUT_DIR = Path("data/c4_realnewslike_gemma")
 DEFAULT_TOKENIZER = "google/gemma-3-270m"
 
@@ -97,19 +105,23 @@ def build_c4_realnewslike_dataset(
     prompt_length: int = 50,
     continuation_length: int = 50,
     seed: int = 0,
-    source_url: str = C4_REALNEWSLIKE_VALIDATION_URL,
+    split: str = "validation",
 ) -> Path:
     """Build a deterministic tokenizer-specific sample of C4 realnewslike.
 
     Each retained row consists of the final ``continuation_length`` document
     tokens and the ``prompt_length`` tokens immediately preceding them. A
-    reservoir sample makes every sufficiently long validation document equally
-    likely to be selected without loading the shard into memory.
+    reservoir sample makes every sufficiently long document in the selected
+    shard equally likely to be selected without loading the shard into memory.
     """
     if min(num_samples, prompt_length, continuation_length) <= 0:
         raise ValueError("sample count and token lengths must all be positive")
+    if split not in C4_REALNEWSLIKE_URLS:
+        supported = ", ".join(C4_REALNEWSLIKE_URLS)
+        raise ValueError(f"unsupported split {split!r}; expected one of: {supported}")
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    source_url = C4_REALNEWSLIKE_URLS[split]
     rng = random.Random(seed)
     reservoir: list[tuple[list[int], list[int]]] = []
     eligible_documents = 0
@@ -121,10 +133,10 @@ def build_c4_realnewslike_dataset(
             continue
 
         eligible_documents += 1
-        split = len(token_ids) - continuation_length
+        continuation_start = len(token_ids) - continuation_length
         item = (
-            token_ids[split - prompt_length : split],
-            token_ids[split:],
+            token_ids[continuation_start - prompt_length : continuation_start],
+            token_ids[continuation_start:],
         )
         if len(reservoir) < num_samples:
             reservoir.append(item)
@@ -150,7 +162,7 @@ def build_c4_realnewslike_dataset(
         "source": "allenai/c4",
         "source_url": source_url,
         "config": "realnewslike",
-        "split": "validation",
+        "split": split,
         "tokenizer": tokenizer_name,
         "tokenizer_vocab_size": len(tokenizer),
         "add_special_tokens": True,
@@ -178,6 +190,11 @@ def main() -> None:
     parser.add_argument("--prompt-length", type=int, default=50)
     parser.add_argument("--continuation-length", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--split",
+        choices=tuple(C4_REALNEWSLIKE_URLS),
+        default="validation",
+    )
     args = parser.parse_args()
 
     path = build_c4_realnewslike_dataset(
@@ -187,6 +204,7 @@ def main() -> None:
         prompt_length=args.prompt_length,
         continuation_length=args.continuation_length,
         seed=args.seed,
+        split=args.split,
     )
     print(f"Saved dataset to {path}")
 

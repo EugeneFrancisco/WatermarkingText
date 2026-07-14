@@ -1,0 +1,16 @@
+{
+  "source": "allenai/c4",
+  "source_url": "https://huggingface.co/datasets/allenai/c4/resolve/main/realnewslike/c4-validation.00000-of-00001.json.gz",
+  "config": "realnewslike",
+  "split": "validation",
+  "tokenizer": "google/gemma-3-270m",
+  "tokenizer_vocab_size": 262145,
+  "add_special_tokens": true,
+  "prompt_length": 50,
+  "continuation_length": 50,
+  "num_samples": 10000,
+  "eligible_documents": 12944,
+  "seed": 0,
+  "sampling": "reservoir",
+  "array_dtype": "int32"
+}

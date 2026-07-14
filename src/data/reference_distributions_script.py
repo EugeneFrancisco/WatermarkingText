@@ -34,7 +34,9 @@ def main() -> None:
     from src.watermarkers.its_watermarker import ITSWatermarker
     from src.watermarkers.tournament_watermarker import TournamentWatermarker
 
-    dataset = load_c4_realnewslike_dataset("data/c4_realnewslike_gemma")
+    dataset = load_c4_realnewslike_dataset(
+        "data/c4_realnewslike_gemma_reference"
+    )
     # First 5_000 examples are used for the reference distribution. Make sure
     # there is no overlap during evaluation.
     dataset = Subset(dataset, range(min(5_000, len(dataset))))

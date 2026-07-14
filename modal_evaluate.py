@@ -1,8 +1,8 @@
 """Run a configurable text-watermarker evaluation on a Modal GPU.
 
-The local preprocessed dataset is mounted read-only at
-``/root/project/data/c4_realnewslike_gemma``. Hugging Face model files are
-cached separately in a persistent Modal Volume.
+The local reference and evaluation datasets are mounted read-only under
+``/root/project/data``. Hugging Face model files are cached separately in a
+persistent Modal Volume.
 
 modal run --detach modal_evaluate.py \
   --watermarker tournament \
@@ -26,7 +26,12 @@ import modal
 
 APP_NAME = "watermarker-evaluation"
 PROJECT_ROOT = Path("/root/project")
-DATASET_PATH = PROJECT_ROOT / "data/c4_realnewslike_gemma"
+REFERENCE_DATASET_PATH = (
+    PROJECT_ROOT / "data/c4_realnewslike_gemma_reference"
+)
+EVALUATION_DATASET_PATH = (
+    PROJECT_ROOT / "data/c4_realnewslike_gemma_evaluation"
+)
 HF_CACHE_PATH = Path("/cache/huggingface")
 RESULTS_PATH = Path("/results")
 REFERENCE_DISTRIBUTIONS_PATH = Path("/reference_distributions")
@@ -62,8 +67,12 @@ image = (
     .add_local_dir("src", str(PROJECT_ROOT / "src"))
     .add_local_dir("configs", str(PROJECT_ROOT / "configs"))
     .add_local_dir(
-        "data/c4_realnewslike_gemma",
-        str(DATASET_PATH),
+        "data/c4_realnewslike_gemma_reference",
+        str(REFERENCE_DATASET_PATH),
+    )
+    .add_local_dir(
+        "data/c4_realnewslike_gemma_evaluation",
+        str(EVALUATION_DATASET_PATH),
     )
     .add_local_dir(
         "data/reference_distributions",
@@ -154,7 +163,7 @@ def evaluate_watermarker(
     }
     watermarker = watermarker_class(watermarker_config)
 
-    dataset = load_c4_realnewslike_dataset(DATASET_PATH)
+    dataset = load_c4_realnewslike_dataset(EVALUATION_DATASET_PATH)
     count = min(num_examples, len(dataset))
     if count <= 0:
         raise ValueError(
@@ -222,7 +231,7 @@ def build_reference_distributions(
     llm = GemmaModel(llm_config)
     hf_cache.commit()
 
-    dataset = load_c4_realnewslike_dataset(DATASET_PATH)
+    dataset = load_c4_realnewslike_dataset(REFERENCE_DATASET_PATH)
     count = min(num_examples, len(dataset))
     if count <= 0:
         raise ValueError(

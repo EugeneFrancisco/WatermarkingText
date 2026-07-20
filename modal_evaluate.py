@@ -11,7 +11,7 @@ modal run --detach modal_evaluate.py \
 
 modal run --detach modal_evaluate.py \
   --build-references \
-  --num-examples 1000 \
+  --num-examples 5000 \
   --model-name google/gemma-2-9b
 
 """
@@ -92,6 +92,7 @@ def evaluate_watermarker(
     watermarker_name: str = "tournament",
     num_examples: int = 500,
     model_name: str = "google/gemma-3-270m",
+    watermark: bool = True,
 ) -> dict:
     """Build the selected watermarker and evaluate the first dataset examples."""
     import os
@@ -170,11 +171,20 @@ def evaluate_watermarker(
             "num_examples must be positive and the dataset must be nonempty"
         )
 
-    results = watermarker.evaluate(Subset(dataset, range(count)))
+    results = watermarker.evaluate(
+        Subset(dataset, range(count)), watermark=watermark
+    )
     results["num_examples_requested"] = num_examples
     results["num_examples_available"] = len(dataset)
     results["model_name"] = model_name
     results["watermarker"] = normalized_name
+    results["watermark"] = watermark
+    results["reference_distribution_path"] = str(
+        watermarker.reference_distribution_path
+    )
+    results["reference_distribution_size"] = int(
+        watermarker.reference_distribution.numel()
+    )
     # These originate in JSON and are therefore safe to return through Modal.
     # Runtime-only objects such as the model and torch dtype are intentionally
     # omitted.
@@ -201,7 +211,6 @@ def build_reference_distributions(
     import sys
 
     import torch
-    from torch.utils.data import Subset
 
     os.chdir(PROJECT_ROOT)
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -232,12 +241,15 @@ def build_reference_distributions(
     hf_cache.commit()
 
     dataset = load_c4_realnewslike_dataset(REFERENCE_DATASET_PATH)
-    count = min(num_examples, len(dataset))
-    if count <= 0:
+    if num_examples <= 0 or len(dataset) == 0:
         raise ValueError(
             "num_examples must be positive and the dataset must be nonempty"
         )
-    dataset = Subset(dataset, range(count))
+    if num_examples > len(dataset):
+        raise ValueError(
+            f"Cannot build {num_examples} reference statistics from only "
+            f"{len(dataset)} prompts"
+        )
 
     watermarker_types = (
         (
@@ -249,13 +261,6 @@ def build_reference_distributions(
     )
     saved_paths: list[str] = []
     for name, watermarker_type, method_config_path in watermarker_types:
-        method_dir = REFERENCE_DISTRIBUTIONS_PATH / name
-        expected_path = method_dir / "non_levenshtein.npy"
-        if expected_path.exists():
-            print(f"Skipping completed reference distribution for {name}")
-            saved_paths.append(str(expected_path))
-            continue
-
         with method_config_path.open(encoding="utf-8") as config_file:
             method_config = json.load(config_file)
         config = common["watermarker"] | method_config | {
@@ -267,6 +272,7 @@ def build_reference_distributions(
             watermarker,
             name,
             dataset,
+            num_examples,
             REFERENCE_DISTRIBUTIONS_PATH,
             reference_distributions_volume.commit,
         )
@@ -305,6 +311,7 @@ def run_and_save_evaluation(
     watermarker: str,
     num_examples: int,
     model_name: str,
+    watermark: bool,
 ) -> str:
     """Run and persist an evaluation entirely within Modal."""
     # Spawning the long GPU call gives it an independently trackable function
@@ -313,6 +320,7 @@ def run_and_save_evaluation(
         watermarker,
         num_examples,
         model_name,
+        watermark,
     )
     results = evaluation_call.get()
     result_path = save_results.remote(results)
@@ -329,6 +337,7 @@ def main(
     num_examples: int = 1_000,
     model_name: str = "google/gemma-3-270m",
     build_references: bool = False,
+    watermark: bool = True,
 ) -> None:
     """Submit remote orchestration and return without waiting for completion."""
     if build_references:
@@ -346,5 +355,6 @@ def main(
         watermarker,
         num_examples,
         model_name,
+        watermark,
     )
     print(f"Submitted detached evaluation call {function_call.object_id}")

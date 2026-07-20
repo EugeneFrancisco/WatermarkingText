@@ -51,6 +51,18 @@ class _CheckpointWatermarker(Watermarker):
         return y[0].float()
 
 
+class _SometimesShortWatermarker(_CheckpointWatermarker):
+    """Skip prompts whose token value is odd by generating no continuation."""
+
+    def generate(
+        self, context: torch.Tensor, generation_length: int
+    ) -> torch.Tensor:
+        self.generate_calls += 1
+        if context[-1].item() % 2:
+            return context
+        return torch.cat((context, context[-1:].clone()))
+
+
 class ReferenceDistributionResumeTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dataset = [torch.tensor([value]) for value in range(205)]
@@ -64,6 +76,7 @@ class ReferenceDistributionResumeTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "simulated restart"):
                 interrupted.build_null_distribution(
                     self.dataset,
+                    len(self.dataset),
                     use_levenshtein=False,
                     save_dir=save_dir,
                     checkpoint_callback=lambda: commits.append(None),
@@ -80,6 +93,7 @@ class ReferenceDistributionResumeTest(unittest.TestCase):
             resumed = _CheckpointWatermarker()
             values = resumed.build_null_distribution(
                 self.dataset,
+                len(self.dataset),
                 use_levenshtein=False,
                 save_dir=save_dir,
                 checkpoint_callback=lambda: commits.append(None),
@@ -94,29 +108,58 @@ class ReferenceDistributionResumeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             first = _CheckpointWatermarker()
             expected = first.build_null_distribution(
-                self.dataset, False, directory
+                self.dataset, len(self.dataset), False, directory
             )
 
             second = _CheckpointWatermarker(fail_after=0)
             actual = second.build_null_distribution(
-                self.dataset, False, directory
+                self.dataset, len(self.dataset), False, directory
             )
 
             self.assertEqual(second.generate_calls, 0)
             torch.testing.assert_close(actual, expected)
+
+    def test_short_generations_do_not_count_toward_requested_size(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            watermarker = _SometimesShortWatermarker()
+
+            values = watermarker.build_null_distribution(
+                self.dataset, 50, False, directory
+            )
+
+            self.assertEqual(watermarker.generate_calls, 99)
+            torch.testing.assert_close(
+                values, torch.arange(0, 100, 2).double()
+            )
+            saved = np.load(Path(directory) / "non_levenshtein.npy")
+            self.assertEqual(len(saved), 50)
+
+    def test_completed_distribution_with_wrong_size_is_rebuilt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            completed_path = Path(directory) / "non_levenshtein.npy"
+            np.save(completed_path, np.arange(3, dtype=np.float64))
+            watermarker = _CheckpointWatermarker()
+
+            values = watermarker.build_null_distribution(
+                self.dataset, 5, False, directory
+            )
+
+            self.assertEqual(watermarker.generate_calls, 5)
+            torch.testing.assert_close(values, torch.arange(5).double())
+            self.assertEqual(len(np.load(completed_path)), 5)
 
     def test_partial_checkpoint_rejects_a_different_dataset_length(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             interrupted = _CheckpointWatermarker(fail_after=101)
             with self.assertRaises(RuntimeError):
                 interrupted.build_null_distribution(
-                    self.dataset, False, directory
+                    self.dataset, len(self.dataset), False, directory
                 )
 
             resumed = _CheckpointWatermarker()
             with self.assertRaisesRegex(ValueError, "different dataset length"):
                 resumed.build_null_distribution(
-                    self.dataset[:-1], False, directory
+                    self.dataset[:-1], len(self.dataset) - 1, False, directory
                 )
 
     def test_reference_helper_only_builds_non_levenshtein_distribution(self) -> None:
@@ -127,6 +170,7 @@ class ReferenceDistributionResumeTest(unittest.TestCase):
                 watermarker,
                 "test_method",
                 self.dataset,
+                len(self.dataset),
                 directory,
                 lambda: commits.append(None),
             )

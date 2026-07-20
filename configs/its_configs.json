@@ -1,3 +1,6 @@
 {
-  "levenshtein_penalty": 0.4
+  "levenshtein_penalty": 0.4,
+  "reference_dist_paths": {
+    "non_levenshtein": "data/reference_distributions/its/non_levenshtein.npy"
+  }
 }

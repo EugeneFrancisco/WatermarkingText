@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Callable
 
-from torch.utils.data import Dataset, Subset
+from torch.utils.data import Dataset
 
 from src.watermarkers.watermarker import Watermarker
 
@@ -12,6 +12,7 @@ def save_reference_distributions(
     watermarker: Watermarker,
     watermarker_name: str,
     dataset: Dataset,
+    num_statistics: int,
     output_dir: str | Path,
     flush: Callable[[], None],
 ) -> list[Path]:
@@ -20,6 +21,7 @@ def save_reference_distributions(
     path = method_dir / "non_levenshtein.npy"
     watermarker.build_null_distribution(
         dataset,
+        num_statistics,
         use_levenshtein=False,
         save_dir=method_dir,
         checkpoint_callback=flush,
@@ -37,9 +39,7 @@ def main() -> None:
     dataset = load_c4_realnewslike_dataset(
         "data/c4_realnewslike_gemma_reference"
     )
-    # First 5_000 examples are used for the reference distribution. Make sure
-    # there is no overlap during evaluation.
-    dataset = Subset(dataset, range(min(5_000, len(dataset))))
+    num_statistics = 5_000
 
     watermarker_types = (
         (
@@ -57,6 +57,7 @@ def main() -> None:
             watermarker,
             name,
             dataset,
+            num_statistics,
             "data/reference_distributions",
             lambda: None,
         )

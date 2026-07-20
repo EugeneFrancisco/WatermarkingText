@@ -3,6 +3,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -16,6 +17,8 @@ transformers.AutoTokenizer = object
 with patch.dict(sys.modules, {"transformers": transformers}):
     from src.llms.gemma import GemmaModel
     from src.watermarkers.exponential_watermarker import ExponentialWatermarker
+    from src.watermarkers.its_watermarker import ITSWatermarker
+    from src.watermarkers.tournament_watermarker import TournamentWatermarker
 
 
 class _DetectWatermarker(Watermarker):
@@ -102,6 +105,37 @@ class ReferenceDistributionDetectionTest(unittest.TestCase):
                 watermarker.reference_distribution,
                 torch.tensor([1.25, 2.5]),
             )
+
+    def test_every_watermarker_loads_configured_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reference.npy"
+            np.save(path, np.array([1.25, 2.5], dtype=np.float64))
+            llm = object.__new__(GemmaModel)
+            llm.model = SimpleNamespace(
+                config=SimpleNamespace(vocab_size=8)
+            )
+            config = {
+                "device": "cpu",
+                "llm": llm,
+                "key_length": 1,
+                "resample_size": 1,
+                "block_size": 1,
+                "levenshtein_penalty": 0,
+                "reference_dist_paths": {"non_levenshtein": str(path)},
+                "num_rounds": 1,
+            }
+
+            for watermarker_type in (
+                ExponentialWatermarker,
+                ITSWatermarker,
+                TournamentWatermarker,
+            ):
+                with self.subTest(watermarker=watermarker_type.__name__):
+                    watermarker = watermarker_type(config)
+                    torch.testing.assert_close(
+                        watermarker.reference_distribution,
+                        torch.tensor([1.25, 2.5]),
+                    )
 
 
 if __name__ == "__main__":

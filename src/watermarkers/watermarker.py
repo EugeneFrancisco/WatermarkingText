@@ -37,6 +37,31 @@ class Watermarker(ABC):
         # How many times to resample to get a baseline for the p-value in detect.
         self.resample_size = self.configs["resample_size"]
 
+        # Load the precomputed non-Levenshtein null statistics once. Keeping
+        # this in the base class ensures every watermarker uses the same fast
+        # detection path and makes a missing configured file fail at startup.
+        self.reference_distribution_path = Path(
+            self.configs["reference_dist_paths"]["non_levenshtein"]
+        )
+        values = np.load(
+            self.reference_distribution_path, allow_pickle=False
+        )
+        if values.ndim != 1 or values.size == 0:
+            raise ValueError(
+                "The non-Levenshtein reference distribution must be a "
+                "nonempty one-dimensional array"
+            )
+        if not np.issubdtype(values.dtype, np.number) or not np.isfinite(
+            values
+        ).all():
+            raise ValueError(
+                "The non-Levenshtein reference distribution must contain "
+                "only finite numeric values"
+            )
+        self.reference_distribution = torch.as_tensor(
+            values, dtype=torch.float32, device=self.device
+        )
+
         # The block size for sliding window detection.
         self.block_size = self.configs["block_size"]
 
@@ -207,9 +232,7 @@ class Watermarker(ABC):
         observed_stat = self.test_statistic(
             y, self.xi, use_levenshtein=use_levenshtein
         )
-        reference_distribution = getattr(
-            self, "reference_distribution", None
-        )
+        reference_distribution = getattr(self, "reference_distribution", None)
         if reference_distribution is not None and not use_levenshtein:
             reference_distribution = reference_distribution.to(
                 device=observed_stat.device, dtype=observed_stat.dtype
@@ -235,16 +258,16 @@ class Watermarker(ABC):
     def build_null_distribution(
         self,
         dataset: Dataset,
+        num_statistics: int,
         use_levenshtein: bool,
         save_dir: str | Path,
         checkpoint_callback: Callable[[], None] | None = None,
     ) -> torch.Tensor:
         """
-        Using the passed in dataset, generates text using the dataset and then computes
-        null test statistics for later bootstrapped use. Progress is saved after every
-        100 computed statistics, so an interrupted run resumes from its latest checkpoint
-        instead of rebuilding the distribution from scratch. The generated text is always
-        self.generation_length long.
+        Generate text from successive prompts until ``num_statistics`` usable null test
+        statistics have been computed. Progress is saved after every 100 computed
+        statistics, so an interrupted run resumes from its latest checkpoint instead of
+        rebuilding the distribution from scratch.
 
         Note that the dataset passed in here should closely reflect the data that we later
         wish to check watermarks; otherwise the distribution of these reference statistics
@@ -252,6 +275,7 @@ class Watermarker(ABC):
 
         Args:
             dataset: A dataset of prompts where each element of the dataset is one prompt.
+            num_statistics: The exact number of statistics to save.
             use_levenshtein: Whether detection should use the Levenshtein cost.
             save_dir: Directory in which the completed distribution and its in-progress
                 checkpoint are stored.
@@ -268,15 +292,27 @@ class Watermarker(ABC):
         completed_path = save_path / f"{distribution_name}.npy"
         checkpoint_path = save_path / f".{distribution_name}.checkpoint.npz"
         dataset_length = len(dataset)
+        if num_statistics <= 0:
+            raise ValueError("num_statistics must be positive")
+        if num_statistics > dataset_length:
+            raise ValueError(
+                f"Cannot build {num_statistics} statistics from only "
+                f"{dataset_length} prompts"
+            )
 
         if completed_path.exists():
-            print(f"Loading completed reference distribution: {completed_path}")
             values = np.load(completed_path, allow_pickle=False)
-            if checkpoint_path.exists():
-                checkpoint_path.unlink()
-                if checkpoint_callback is not None:
-                    checkpoint_callback()
-            return torch.from_numpy(np.array(values, copy=True)).to(self.device)
+            if values.ndim == 1 and len(values) == num_statistics:
+                print(f"Loading completed reference distribution: {completed_path}")
+                if checkpoint_path.exists():
+                    checkpoint_path.unlink()
+                    if checkpoint_callback is not None:
+                        checkpoint_callback()
+                return torch.from_numpy(np.array(values, copy=True)).to(self.device)
+            print(
+                f"Rebuilding {completed_path}: expected {num_statistics} "
+                f"statistics, found {len(values) if values.ndim == 1 else 0}"
+            )
 
         statistics: list[float] = []
         next_dataset_index = 0
@@ -289,6 +325,13 @@ class Watermarker(ABC):
                         "Cannot resume reference distribution with a different "
                         f"dataset length: checkpoint has {checkpoint_dataset_length}, "
                         f"current dataset has {dataset_length}"
+                    )
+                checkpoint_num_statistics = int(checkpoint["num_statistics"])
+                if checkpoint_num_statistics != num_statistics:
+                    raise ValueError(
+                        "Cannot resume reference distribution with a different "
+                        f"target size: checkpoint has {checkpoint_num_statistics}, "
+                        f"current target is {num_statistics}"
                     )
                 next_dataset_index = int(checkpoint["next_dataset_index"])
                 statistics = checkpoint["statistics"].astype(
@@ -320,14 +363,16 @@ class Watermarker(ABC):
             finally:
                 temporary_path.unlink(missing_ok=True)
 
-        progress = tqdm(
+        prompt_indices = tqdm(
             range(next_dataset_index, dataset_length),
             total=dataset_length,
             initial=next_dataset_index,
             desc=f"Building {distribution_name} null distribution",
         )
         statistics_at_last_checkpoint = len(statistics)
-        for dataset_index in progress:
+        for dataset_index in prompt_indices:
+            if len(statistics) >= num_statistics:
+                break
             prompt = dataset[dataset_index]
             prompt = torch.as_tensor(prompt, device=self.device)
             output = self.generate(prompt, self.generation_length)
@@ -351,18 +396,22 @@ class Watermarker(ABC):
                         statistics=np.asarray(statistics, dtype=np.float64),
                         next_dataset_index=np.asarray(next_index, dtype=np.int64),
                         dataset_length=np.asarray(dataset_length, dtype=np.int64),
+                        num_statistics=np.asarray(
+                            num_statistics, dtype=np.int64
+                        ),
                     ),
                 )
                 statistics_at_last_checkpoint = len(statistics)
                 if checkpoint_callback is not None:
                     checkpoint_callback()
 
-        if not statistics:
+        if len(statistics) < num_statistics:
             raise ValueError(
-                "dataset must produce at least one generation of block_size tokens"
+                f"Dataset was exhausted after producing {len(statistics)} of "
+                f"the requested {num_statistics} statistics"
             )
 
-        values = np.asarray(statistics, dtype=np.float64)
+        values = np.asarray(statistics[:num_statistics], dtype=np.float64)
         atomic_numpy_save(
             completed_path,
             lambda output_file: np.save(output_file, values),
@@ -373,7 +422,7 @@ class Watermarker(ABC):
 
         return torch.from_numpy(values.copy()).to(self.device)
 
-    def evaluate(self, dataset: Dataset) -> dict:
+    def evaluate(self, dataset: Dataset, watermark: bool = True) -> dict:
         """
         Evaluates the watermarker on the passed in dataset. Evaluation is done by performing
         watermarked text generation on the passed in dataset and seeing how well our watermarker
@@ -388,6 +437,8 @@ class Watermarker(ABC):
             organized so that each element of the dataset should be a "prompt" of token ids
             of fixed size. This means the dataset's dimensions should be an N x prompt_length
             matrix of token ids.
+            watermark: Whether to watermark generated text. When false, text is sampled
+                directly from the underlying LLM.
         Returns:
             A dictionary of information of how the watermarker performed. The dictionary has the
             following structure:
@@ -409,7 +460,10 @@ class Watermarker(ABC):
 
         for prompt in tqdm(dataset, desc="Evaluating"):
             prompt = torch.as_tensor(prompt, device=self.device)
-            output = self.generate(prompt, self.generation_length)
+            if watermark:
+                output = self.generate(prompt, self.generation_length)
+            else:
+                output = self.llm.generate(prompt, self.generation_length)
             generated = output[len(prompt):]
 
             if len(generated) < self.block_size:

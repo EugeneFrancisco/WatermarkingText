@@ -119,8 +119,13 @@ class TournamentWatermarker(Watermarker):
 
         for layer in range(self.num_rounds):
             g = g_values[:, layer]
-            g_mass = torch.sum(probs * g)
+            # Mathematically g_mass is in [0, 1], but CUDA's parallel float32
+            # reduction can round it just outside that interval. With many
+            # rounds that makes some entries slightly negative, which causes
+            # torch.multinomial to trigger a device-side assertion.
+            g_mass = torch.sum(probs * g).clamp(0, 1)
             probs = probs * (1 + g - g_mass)
+            probs.clamp_min_(0)
 
             # The recurrence is normalized analytically. Renormalizing limits
             # floating-point drift across many tournament layers.

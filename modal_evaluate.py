@@ -206,7 +206,7 @@ def build_reference_distributions(
     num_examples: int = 1_000,
     model_name: str = "google/gemma-3-270m",
 ) -> list[str]:
-    """Build Tournament and ITS non-Levenshtein distributions on Modal."""
+    """Build all watermarker non-Levenshtein distributions on Modal."""
     import os
     import sys
 
@@ -221,6 +221,7 @@ def build_reference_distributions(
     )
     from src.data.utils import load_c4_realnewslike_dataset
     from src.llms.gemma import GemmaModel
+    from src.watermarkers.exponential_watermarker import ExponentialWatermarker
     from src.watermarkers.its_watermarker import ITSWatermarker
     from src.watermarkers.tournament_watermarker import TournamentWatermarker
 
@@ -252,6 +253,11 @@ def build_reference_distributions(
         )
 
     watermarker_types = (
+        (
+            "exponential",
+            ExponentialWatermarker,
+            PROJECT_ROOT / "configs/exponential_configs.json",
+        ),
         (
             "tournament",
             TournamentWatermarker,

@@ -1,0 +1,32 @@
+{
+  "experiment_config": {
+    "block_size": 100,
+    "device": "mps",
+    "evaluating": true,
+    "fpr": 0.05,
+    "generation_length": 100,
+    "key_length": 256,
+    "levenshtein_penalty": 0,
+    "num_rounds": 30,
+    "reference_dist_paths": {
+      "non_levenshtein": "data/reference_distributions/tournament/non_levenshtein.npy"
+    },
+    "resample_size": 1000
+  },
+  "max": 0.9921331405639648,
+  "mean_p": 0.1485731601715088,
+  "min": 0.00030257186153903604,
+  "model_name": "google/gemma-2-9b",
+  "num_examples_available": 10000,
+  "num_examples_requested": 1000,
+  "percentiles": {
+    "0.25": 0.00030257186153903604,
+    "0.5": 0.00030257186153903604,
+    "0.75": 0.05173978954553604
+  },
+  "power": 0.7447761297225952,
+  "reference_distribution_path": "data/reference_distributions/tournament/non_levenshtein.npy",
+  "reference_distribution_size": 3304,
+  "watermark": true,
+  "watermarker": "tournament"
+}

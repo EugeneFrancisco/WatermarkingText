@@ -106,6 +106,30 @@ class ReferenceDistributionDetectionTest(unittest.TestCase):
                 torch.tensor([1.25, 2.5]),
             )
 
+    def test_builder_can_start_without_completed_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing_path = Path(directory) / "non_levenshtein.npy"
+            config = {
+                "device": "cpu",
+                "llm": object.__new__(GemmaModel),
+                "key_length": 1,
+                "resample_size": 1,
+                "block_size": 1,
+                "levenshtein_penalty": 0,
+                "reference_dist_paths": {
+                    "non_levenshtein": str(missing_path)
+                },
+                "num_rounds": 1,
+                "building_reference_distribution": True,
+            }
+
+            watermarker = TournamentWatermarker(config)
+
+            self.assertEqual(
+                watermarker.reference_distribution_path, missing_path
+            )
+            self.assertIsNone(watermarker.reference_distribution)
+
     def test_every_watermarker_loads_configured_distribution(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "reference.npy"

@@ -253,17 +253,17 @@ def build_reference_distributions(
         )
 
     watermarker_types = (
-        (
-            "exponential",
-            ExponentialWatermarker,
-            PROJECT_ROOT / "configs/exponential_configs.json",
-        ),
+        # (
+        #     "exponential",
+        #     ExponentialWatermarker,
+        #     PROJECT_ROOT / "configs/exponential_configs.json",
+        # ),
         (
             "tournament",
             TournamentWatermarker,
             PROJECT_ROOT / "configs/tournament_configs.json",
         ),
-        ("its", ITSWatermarker, PROJECT_ROOT / "configs/its_configs.json"),
+        # ("its", ITSWatermarker, PROJECT_ROOT / "configs/its_configs.json"),
     )
     saved_paths: list[str] = []
     for name, watermarker_type, method_config_path in watermarker_types:
@@ -272,6 +272,7 @@ def build_reference_distributions(
         config = common["watermarker"] | method_config | {
             "device": "cuda",
             "llm": llm,
+            "building_reference_distribution": True,
         }
         watermarker = watermarker_type(config)
         paths = save_reference_distributions(

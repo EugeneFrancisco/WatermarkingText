@@ -1,0 +1,31 @@
+{
+  "experiment_config": {
+    "block_size": 100,
+    "device": "mps",
+    "evaluating": true,
+    "fpr": 0.05,
+    "generation_length": 100,
+    "key_length": 256,
+    "levenshtein_penalty": 0,
+    "reference_dist_paths": {
+      "non_levenshtein": "data/reference_distributions/exponential/non_levenshtein.npy"
+    },
+    "resample_size": 1000
+  },
+  "max": 0.9954968094825745,
+  "mean_p": 0.06955540180206299,
+  "min": 0.000300210143905133,
+  "model_name": "google/gemma-2-9b",
+  "num_examples_available": 10000,
+  "num_examples_requested": 1000,
+  "percentiles": {
+    "0.25": 0.000300210143905133,
+    "0.5": 0.000300210143905133,
+    "0.75": 0.000300210143905133
+  },
+  "power": 0.858208954334259,
+  "reference_distribution_path": "data/reference_distributions/exponential/non_levenshtein.npy",
+  "reference_distribution_size": 3330,
+  "watermark": true,
+  "watermarker": "exponential"
+}

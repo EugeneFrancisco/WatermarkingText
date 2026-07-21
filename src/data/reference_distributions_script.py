@@ -52,6 +52,7 @@ def main() -> None:
     )
     for name, watermarker_type, method_config in watermarker_types:
         config = build_configs("configs/watermarking_configs.json", method_config)
+        config["building_reference_distribution"] = True
         watermarker = watermarker_type(config)
         save_reference_distributions(
             watermarker,

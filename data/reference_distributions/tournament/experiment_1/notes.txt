@@ -1,0 +1,1 @@
+First trial, results are a bit worse than exponential. Going to try with more rounds.

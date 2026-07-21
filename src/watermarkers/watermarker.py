@@ -37,30 +37,33 @@ class Watermarker(ABC):
         # How many times to resample to get a baseline for the p-value in detect.
         self.resample_size = self.configs["resample_size"]
 
-        # Load the precomputed non-Levenshtein null statistics once. Keeping
-        # this in the base class ensures every watermarker uses the same fast
-        # detection path and makes a missing configured file fail at startup.
+        # Load the precomputed non-Levenshtein null statistics once. A builder
+        # must be constructible before this file exists, so reference-building
+        # jobs explicitly skip the load and populate the file through
+        # build_null_distribution instead.
         self.reference_distribution_path = Path(
             self.configs["reference_dist_paths"]["non_levenshtein"]
         )
-        values = np.load(
-            self.reference_distribution_path, allow_pickle=False
-        )
-        if values.ndim != 1 or values.size == 0:
-            raise ValueError(
-                "The non-Levenshtein reference distribution must be a "
-                "nonempty one-dimensional array"
+        self.reference_distribution: torch.Tensor | None = None
+        if not self.configs.get("building_reference_distribution", False):
+            values = np.load(
+                self.reference_distribution_path, allow_pickle=False
             )
-        if not np.issubdtype(values.dtype, np.number) or not np.isfinite(
-            values
-        ).all():
-            raise ValueError(
-                "The non-Levenshtein reference distribution must contain "
-                "only finite numeric values"
+            if values.ndim != 1 or values.size == 0:
+                raise ValueError(
+                    "The non-Levenshtein reference distribution must be a "
+                    "nonempty one-dimensional array"
+                )
+            if not np.issubdtype(values.dtype, np.number) or not np.isfinite(
+                values
+            ).all():
+                raise ValueError(
+                    "The non-Levenshtein reference distribution must contain "
+                    "only finite numeric values"
+                )
+            self.reference_distribution = torch.as_tensor(
+                values, dtype=torch.float32, device=self.device
             )
-        self.reference_distribution = torch.as_tensor(
-            values, dtype=torch.float32, device=self.device
-        )
 
         # The block size for sliding window detection.
         self.block_size = self.configs["block_size"]
